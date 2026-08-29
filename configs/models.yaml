@@ -5,17 +5,69 @@
 # recorded in results/phase1/logprob_check.json and every later phase must use
 # that same one.
 #
-# backend: vertex | llamacpp | vllm | gemini | ollama_native | auto
+# backend: openai | anthropic | llamacpp | vllm | vertex | gemini | ollama_native | auto
 #   auto -> try each entry of `fallback_order` until one returns real logprobs.
-backend: vertex
+#
+# The BSN_BACKEND environment variable OVERRIDES this value when set, so you can
+# switch stacks without editing a tracked file:
+#     BSN_BACKEND=anthropic python scripts/check_logprobs.py
+backend: openai
 
-# Ollama is deliberately NOT in this chain (see ollama_native below).
-# `gemini` is also excluded: the Developer API surface rejects logprobs on
-# every model (verified live -- see README), so it can never satisfy gate 1.
-fallback_order: [vertex, llamacpp, vllm]
+# Only genuine logprob backends belong here. `anthropic` is deliberately
+# EXCLUDED: it has no logprobs and estimates confidence by self-consistency
+# sampling, so silently falling back to it would change what the numbers mean
+# with no visible signal. Select it explicitly if you want it.
+# `vertex`/`gemini` are excluded while paused (see below).
+fallback_order: [openai, llamacpp, vllm]
+
+# Refuse to run any backend whose confidence is not model log-probabilities.
+# Set false only to deliberately accept self-consistency sampling.
+require_logprobs: true
 
 backends:
   # ---------------------------------------------------------------- HOSTED --
+  # OpenAI chat/completions. TRUE logprobs -- the default backend.
+  # `top_logprobs` is capped at 20 by the API, which is why 20 is the default
+  # and why the 8-label set (A-H) fits comfortably in one request.
+  openai:
+    endpoint: "https://api.openai.com/v1/chat/completions"
+    # CONFIRM this against OpenAI's current model list before a real run --
+    # model names change and are deprecated on a rolling basis.
+    model: "gpt-4o-mini"
+    style: openai
+    api_key_env: OPENAI_API_KEY
+    auth_style: bearer
+
+  # ---------------------------------------------------------------- HOSTED --
+  # Anthropic Messages API. NO LOGPROBS -- self-consistency instead.
+  #
+  # The Messages API exposes no logprobs/top_logprobs: there is no parameter
+  # for it and no model that enables it. This backend therefore CANNOT satisfy
+  # gate 1, and is NOT a drop-in substitute for a logprob backend. It samples
+  # the same prompt k times at a non-zero temperature and uses the vote
+  # fraction per label as the probability.
+  #
+  # Confidence resolution is bounded by 1/k (k=10 -> steps of 0.1), and every
+  # result is tagged confidence_method="self_consistency". Never pool these
+  # numbers with logprob numbers in one analysis. Robustness check, not the
+  # primary method. Costs k x inference.
+  anthropic:
+    endpoint: "https://api.anthropic.com/v1/messages"
+    # CONFIRM against Anthropic's current model list before a real run.
+    model: "claude-haiku-4-5-20251001"
+    style: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    auth_style: x-api-key
+    extra_headers:
+      anthropic-version: "2023-06-01"
+    k_samples: 10           # votes per window; resolution floor = 1/k
+    sample_temperature: 0.7 # must be > 0 or all k samples are identical
+
+  # ---------------------------------------------------- PAUSED (see below) --
+  # PAUSED pending credentials -- code verified against mocks, not yet run
+  # live. See walkthrough Phase 1 section 3.2 for the Developer-API logprobs
+  # limitation.
+  #
   # Vertex AI (Google Cloud) -- the surface where Gemini logprobs are actually
   # available. Same generateContent body as the Developer API; different URL
   # and OAuth2 (bearer token) auth instead of an API key.
@@ -39,7 +91,11 @@ backends:
     location: "us-central1"
     thinking_budget: 0
 
-  # ----------------------------------------------------- NOT IN THE CHAIN --
+  # ---------------------------------------------------- PAUSED (see below) --
+  # PAUSED pending credentials -- code verified against mocks, not yet run
+  # live. See walkthrough Phase 1 section 3.2 for the Developer-API logprobs
+  # limitation.
+  #
   # Gemini DEVELOPER API (AI Studio key). VERIFIED NON-WORKING for this
   # project: on 2026-08-29 all 12 probed models -- gemini-2.5-flash,
   # gemini-2.5-pro, gemini-flash-latest, gemini-3-flash-preview,

@@ -55,8 +55,10 @@ Selected by `backend:` in `configs/models.yaml`; `auto` walks `fallback_order`.
 
 | Backend | Endpoint | How logprobs are requested |
 |---|---|---|
-| `vertex` *(default)* | Vertex `generateContent` | `responseLogprobs: true`, `logprobs: N`; OAuth2 bearer, GCP project |
-| `gemini` | Developer `generateContent` | **verified non-working** — surface rejects logprobs |
+| `openai` *(default)* | `POST /v1/chat/completions` | `logprobs: true`, `top_logprobs: N` (API caps N at 20) |
+| `anthropic` | `POST /v1/messages` | **no logprobs exist** — k-sample self-consistency instead |
+| `vertex` | Vertex `generateContent` | **PAUSED** pending credentials |
+| `gemini` | Developer `generateContent` | **PAUSED** — verified non-working, surface rejects logprobs |
 | `llamacpp` | `POST /completion` | `n_probs`, `post_sampling_probs: false` |
 | `vllm` | `POST /v1/completions` | `logprobs: N`, `echo: true` |
 | `ollama_native` | `POST /api/generate` | kept for reference, **removed from the fallback chain** |
@@ -232,11 +234,17 @@ at runtime — the script aborts if they overlap).
 
 ## 7. Current blockers
 
-1. **Vertex AI credentials.** The `vertex` backend is implemented and its code
-   path is verified against a mock, but this machine has no GCP auth: no
-   gcloud CLI, no ADC, no service-account key. Set `GOOGLE_CLOUD_PROJECT` and
-   either `GOOGLE_APPLICATION_CREDENTIALS` or run
-   `gcloud auth application-default login`. See `.env.example`.
+1. **An API key for a logprob backend.** The default is now `openai`, which has
+   true logprobs. Set `OPENAI_API_KEY` in `.env`. Alternatives that need no
+   key: run `llama-server` locally and set `BSN_BACKEND=llamacpp`.
+
+   **Vertex is PARKED, not abandoned.** The `vertex` and `gemini` backends are
+   left in place, unchanged and correct; they are simply removed from
+   `fallback_order` so `auto` does not burn a timeout on an unauthenticated
+   Vertex call on every run. Both carry a "PAUSED pending credentials" note in
+   `configs/models.yaml`. Re-enable by setting `BSN_BACKEND=vertex` once GCP
+   credentials exist — no code change needed.
+
 2. Then run, in order:
    ```bash
    python scripts/check_logprobs.py            # must PASS before anything else
@@ -248,6 +256,38 @@ the 3 most-confused class pairs and ranks the candidate fixes from what the
 confusion matrix actually shows — (a) better few-shot, (b) richer features
 (gyro, cross-axis correlation), (c) drop to the 6-class set, (d) larger model.
 Act on that ranking rather than guessing.
+
+---
+
+## 7a. Two confidence methods now exist — do not mix them
+
+`score_labels()` always returns a `confidence_method` field:
+
+| Value | Backends | How it is produced |
+|---|---|---|
+| `logprob` | openai, llamacpp, vllm, vertex, gemini | the model's own next-token log-probabilities, softmax-renormalised over the label tokens |
+| `self_consistency` | anthropic | k sampled answers (default k=10, temperature 0.7); distribution = vote fractions |
+
+The Anthropic Messages API exposes **no logprobs or top_logprobs** — there is no
+parameter and no model that enables it. Self-consistency is a legitimate,
+literature-supported estimator (better calibrated than verbalized confidence),
+but:
+
+- its **resolution is bounded by 1/k** — at k=10 the finest distinguishable
+  confidence step is 0.1, which matters for ECE binning;
+- it costs **k× inference**;
+- it is a **robustness check, not the primary method**.
+
+Three structural guards enforce this rather than relying on a comment:
+1. `anthropic` is **excluded from `fallback_order`**, so `auto` can never
+   silently switch from a logprob method to a sampling one.
+2. `require_logprobs: true` (the default) makes any sampling backend **refuse
+   to run** with an explanation.
+3. Every run prints a provenance banner —
+   `backend=… model=… confidence_method=…` — and the value is written into the
+   result JSON.
+
+**Never pool the two in one analysis.**
 
 ---
 
