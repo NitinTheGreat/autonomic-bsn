@@ -69,6 +69,13 @@ class Window:
     end_sec: float
     frames: dict[str, list[NodeFrame]]
     label: Optional[str]
+    # Added in Phase 3, ADDITIVELY: it has a default, so every existing
+    # construction and every DataSource implementation (including Phase 9's
+    # HardwareLiveSource) remains valid unchanged. Phase 3's injectors record
+    # failure_type, severity, target_node, seed and the REALISED effect
+    # magnitude here, so analysis uses what actually happened rather than what
+    # was requested. Plain sources leave it empty.
+    meta: dict = field(default_factory=dict)
 
 
 @runtime_checkable
