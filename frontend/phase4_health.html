@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase 4 - Health Monitor</title>
+<link rel="stylesheet" href="shared/style.css">
+<style>
+  .nodegrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    gap: var(--gap);
+  }
+  .nodecard {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left-width: 4px;
+    border-radius: var(--radius);
+    padding: 15px 17px;
+  }
+  .nodecard.HEALTHY    { border-left-color: var(--pass); }
+  .nodecard.DEGRADED   { border-left-color: var(--accent); }
+  .nodecard.UNRELIABLE { border-left-color: #e8763d; }
+  .nodecard.OFFLINE    { border-left-color: var(--fail); }
+  .nodecard h3 { margin: 0; font-size: 1rem; text-transform: capitalize; }
+  .statepill {
+    display: inline-block;
+    font-size: .64rem;
+    letter-spacing: .09em;
+    padding: 2px 9px;
+    border-radius: 20px;
+    border: 1px solid currentColor;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .HEALTHY .statepill    { color: var(--pass); }
+  .DEGRADED .statepill   { color: var(--accent); }
+  .UNRELIABLE .statepill { color: #e8763d; }
+  .OFFLINE .statepill    { color: var(--fail); }
+  .dx {
+    font-family: var(--mono);
+    font-size: .92rem;
+    color: var(--accent);
+    margin: 9px 0 3px;
+  }
+  .rule { font-size: .78rem; color: var(--muted); margin-bottom: 10px; }
+  .ev {
+    font-family: var(--mono);
+    font-size: .72rem;
+    color: var(--text);
+    background: rgba(232,236,247,.04);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .sub { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+  .sub .k { width: 92px; font-size: .72rem; color: var(--muted); }
+  .sub .bar { flex: 1; height: 9px; background: rgba(232,236,247,.07);
+              border-radius: 5px; overflow: hidden; }
+  .sub .fill { height: 100%; border-radius: 0 4px 4px 0; }
+  .sub .v { width: 42px; text-align: right; font-family: var(--mono);
+            font-size: .72rem; }
+
+  table.m { border-collapse: collapse; width: 100%; font-size: .8rem; }
+  table.m th, table.m td { padding: 7px 9px; border-bottom: 1px solid var(--border);
+                           text-align: right; }
+  table.m th:first-child, table.m td:first-child { text-align: left; }
+  table.m th { color: var(--muted); font-weight: 500; }
+  table.m td { font-family: var(--mono); font-size: .77rem; }
+  .good { color: var(--pass); } .warn { color: var(--accent); }
+  .bad { color: var(--fail); }
+  table.cm { border-collapse: separate; border-spacing: 2px; font-size: .74rem; }
+  table.cm th { color: var(--muted); font-weight: 500; padding: 3px 6px;
+                white-space: nowrap; }
+  table.cm th.col { writing-mode: vertical-rl; transform: rotate(180deg);
+                    height: 92px; vertical-align: bottom; }
+  table.cm th.row { text-align: right; }
+  table.cm td { width: 46px; height: 30px; text-align: center; border-radius: 5px;
+                font-family: var(--mono); color: var(--text);
+                background: rgba(232,236,247,.04); }
+  table.cm td.diag { outline: 1px solid var(--border-strong); }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header class="page-head">
+    <div class="eyebrow">Phase 4</div>
+    <h1>Health monitor</h1>
+    <p class="muted">
+      Degradation detected and diagnosed from observable signal statistics
+      alone. The monitor receives a <code class="mono">BlindWindow</code>:
+      <code class="mono">injected_failure</code>, the true activity label and
+      every injection field are stripped and <em>raise</em> on access, so the
+      detection numbers below cannot be circular. Ground truth is read only by
+      the scoring module, after the fact.
+    </p>
+  </header>
+
+  <section class="card">
+    <div class="card-title"><h2>Detection by failure type</h2>
+      <span class="small muted">pooled across severities</span></div>
+    <div id="det"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><h2>False positives on clean windows</h2>
+      <span class="small muted" id="fpr-meta"></span></div>
+    <div id="fpr"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><h2>Diagnosis confusion</h2>
+      <span class="small muted">rows = truth &middot; columns = predicted</span></div>
+    <div id="cm"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><h2>Displacement by node &amp; activity</h2>
+      <span class="small muted">alignment-conditioned detectability</span></div>
+    <div id="disp"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><h2>Live verdicts</h2>
+      <span class="small muted" id="live-meta"></span></div>
+    <div id="picker"></div>
+    <div id="live"></div>
+  </section>
+</div>
+
+<script type="module">
+import { loadJSONAny, esc, fmt, notGenerated } from './shared/app.js';
+
+const M_PATHS = ['results/phase4/detection_metrics.json',
+                 '../results/phase4/detection_metrics.json'];
+const V_PATHS = ['data/phase4_samples/verdicts.json'];
+
+const [M, V] = await Promise.all([loadJSONAny(M_PATHS), loadJSONAny(V_PATHS)]);
+
+const SUB_COLOR = (v) => v > 0.9 ? 'var(--pass)'
+  : v > 0.6 ? 'var(--accent)' : v > 0.2 ? '#e8763d' : 'var(--fail)';
+const f1cls = (v) => v >= 0.8 ? 'good' : v >= 0.6 ? 'warn' : 'bad';
+
+/* ------------------------------------------------ detection by failure --- */
+const detEl = document.getElementById('det');
+if (!M) {
+  for (const id of ['det', 'fpr', 'cm', 'disp'])
+    notGenerated(document.getElementById(id), 'scripts/run_detection_eval.py',
+                 ['results/phase4/detection_metrics.json']);
+} else {
+  const d = M.detection_by_failure;
+  detEl.innerHTML = `<div class="matrix-wrap"><table class="m">
+    <thead><tr><th>Failure</th><th>Precision</th><th>Recall</th><th>F1</th>
+      <th>TP</th><th>FP</th><th>FN</th></tr></thead>
+    <tbody>${Object.keys(d).sort().map((ft) => {
+      const a = d[ft].all;
+      return `<tr><td>${esc(ft)}</td><td>${fmt(a.precision, 3)}</td>
+        <td>${fmt(a.recall, 3)}</td>
+        <td class="${f1cls(a.f1)}">${fmt(a.f1, 3)}</td>
+        <td>${a.tp}</td><td>${a.fp}</td><td>${a.fn}</td></tr>`;
+    }).join('')}</tbody></table></div>
+    <div class="legend-note">green &ge; 0.8 &middot; amber &ge; 0.6 &middot;
+      red &lt; 0.6</div>`;
+
+  /* ---------------------------------------------------------- FPR ------- */
+  const fp = M.false_positives;
+  document.getElementById('fpr-meta').textContent =
+    `${fp.n_clean_node_windows} clean node-windows`;
+  document.getElementById('fpr').innerHTML = `
+    <div class="tiles">
+      <div class="tile"><div class="n">${fmt(fp.false_positive_rate, 4)}</div>
+        <div class="k">False-positive rate</div></div>
+      <div class="tile"><div class="n">${fp.false_positives}</div>
+        <div class="k">Flagged</div></div>
+      <div class="tile"><div class="n">${fp.n_clean_node_windows}</div>
+        <div class="k">Clean node-windows</div></div>
+    </div>
+    ${Object.keys(fp.misdiagnosed_as || {}).length ? `
+      <div class="legend-note">misdiagnosed as ${
+        Object.entries(fp.misdiagnosed_as)
+          .map(([k, v]) => `<strong>${esc(k)}</strong> &times;${v}`)
+          .join(', ')}</div>` : ''}`;
+
+  /* --------------------------------------------------- confusion -------- */
+  const cm = M.diagnosis_confusion;
+  const mx = Math.max(...cm.matrix.flat(), 1);
+  document.getElementById('cm').innerHTML = `<div class="matrix-wrap">
+    <table class="cm"><thead><tr><th></th>${
+      cm.labels.map((l) => `<th class="col">${esc(l)}</th>`).join('')}</tr></thead>
+    <tbody>${cm.matrix.map((row, i) => `<tr>
+      <th class="row">${esc(cm.labels[i])}</th>
+      ${row.map((v, j) => {
+        const a = v === 0 ? 0 : 0.10 + 0.90 * (v / mx);
+        return `<td class="${i === j ? 'diag' : ''}"
+          title="${esc(cm.labels[i])} &rarr; ${esc(cm.labels[j])}: ${v}"
+          style="background:rgba(232,163,61,${a.toFixed(3)});color:${
+            a > 0.55 ? '#231602' : 'var(--text)'}">${v || ''}</td>`;
+      }).join('')}</tr>`).join('')}</tbody></table></div>
+    <div class="legend-note">overall diagnosis accuracy
+      <strong>${fmt(cm.overall_accuracy, 4)}</strong> (n=${cm.n}) &middot;
+      outlined cells are correct</div>`;
+
+  /* ------------------------------------------------- displacement ------- */
+  const dz = M.displacement_by_node_activity;
+  document.getElementById('disp').innerHTML = `<div class="matrix-wrap">
+    <table class="m"><thead><tr>
+      <th>Node / activity</th><th>n</th><th>Recall</th><th>Diagnosis acc.</th>
+      <th>Mean realised</th><th>Mean alignment</th><th>Verdict</th>
+    </tr></thead><tbody>${Object.keys(dz).sort().map((k) => {
+      const e = dz[k];
+      return `<tr><td>${esc(k)}</td><td>${e.n}</td>
+        <td class="${f1cls(e.recall)}">${fmt(e.recall, 2)}</td>
+        <td>${fmt(e.diagnosis_accuracy, 2)}</td>
+        <td>${e.mean_realised_deg === null ? '-' : fmt(e.mean_realised_deg, 1) + '&deg;'}</td>
+        <td>${e.mean_alignment === null ? '-' : fmt(e.mean_alignment, 3)}</td>
+        <td class="${e.undetectable ? 'bad' : 'good'}">${
+          e.undetectable ? 'undetectable' : 'detectable'}</td></tr>`;
+    }).join('')}</tbody></table></div>
+    <div class="notice" style="margin-top:12px">
+      Displacement detectability is governed by geometry, not by severity.
+      A rotation about a node's long axis changes the observed gravity
+      direction by <code class="mono">cos(obs) = cos&sup2;&phi; + sin&sup2;&phi;&middot;cos(&theta;)</code>,
+      so where gravity lies near that axis almost nothing is observable. On top
+      of that, a body-worn node's gravity direction naturally swings with
+      posture by more than the rotation itself produces &mdash; so the
+      threshold must clear that natural spread, and low-observability
+      combinations are genuinely undetectable from gravity alone. This is a
+      limit of the method, stated rather than hidden.
+    </div>`;
+}
+
+/* ---------------------------------------------------- live verdicts ----- */
+const pickEl = document.getElementById('picker');
+const liveEl = document.getElementById('live');
+if (!V || !V.verdicts) {
+  notGenerated(pickEl, 'scripts/export_phase4_samples.py',
+               ['frontend/data/phase4_samples/verdicts.json']);
+  notGenerated(liveEl, 'scripts/export_phase4_samples.py',
+               ['frontend/data/phase4_samples/verdicts.json']);
+} else {
+  const keys = Object.keys(V.verdicts).sort();
+  document.getElementById('live-meta').textContent =
+    `${keys.length} pre-computed verdicts`;
+  pickEl.innerHTML = `<div class="field" style="max-width:460px">
+    <label for="k" style="display:block;font-size:.7rem;letter-spacing:.1em;
+      text-transform:uppercase;color:var(--muted);margin-bottom:5px">Sample</label>
+    <select id="k" style="width:100%;padding:9px 11px;background:#0c1020;
+      color:var(--text);border:1px solid var(--border-strong);
+      border-radius:8px;font-size:.88rem">${
+      keys.map((k) => `<option value="${esc(k)}">${
+        esc(k.replace('.json', ''))}</option>`).join('')}</select></div>`;
+  const sel = document.getElementById('k');
+
+  function renderVerdict() {
+    const v = V.verdicts[sel.value];
+    if (!v) return;
+    liveEl.innerHTML = `<div class="nodegrid" style="margin-top:14px">${
+      ['wrist', 'chest', 'ankle'].filter((n) => v.nodes[n]).map((n) => {
+        const nd = v.nodes[n];
+        const subs = Object.entries(nd.sub_scores);
+        return `<div class="nodecard ${esc(nd.state)}">
+          <h3>${esc(n)}<span class="statepill">${esc(nd.state)}</span></h3>
+          <div class="dx">${esc(nd.diagnosis)}</div>
+          <div class="rule">${esc(nd.evidence.rule || '')}</div>
+          <div class="ev">${esc(Object.entries(nd.evidence)
+            .filter(([k]) => k !== 'rule')
+            .map(([k, val]) => `${k}: ${typeof val === 'number'
+              ? Number(val).toFixed(4) : val}`).join('\n'))}</div>
+          ${subs.map(([k, val]) => `<div class="sub">
+            <span class="k">${esc(k)}</span>
+            <span class="bar"><span class="fill" style="width:${
+              (val * 100).toFixed(1)}%;background:${SUB_COLOR(val)}"></span></span>
+            <span class="v">${fmt(val, 2)}</span></div>`).join('')}
+          <div class="legend-note" style="margin-top:8px">trust weight
+            <strong>${fmt(nd.trust_weight, 2)}</strong>${
+            nd.gyro_available ? '' : ' &middot; no gyroscope on this node'}</div>
+        </div>`;
+      }).join('')}</div>
+      ${v.truth ? `<div class="legend-note" style="margin-top:12px">
+        ground truth (display only, never seen by the monitor):
+        <strong>${esc(v.truth.tag || 'clean')}</strong></div>` : ''}`;
+  }
+  sel.addEventListener('change', renderVerdict);
+  renderVerdict();
+}
+</script>
+
+</body>
+</html>
