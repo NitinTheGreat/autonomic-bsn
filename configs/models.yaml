@@ -5,14 +5,37 @@
 # recorded in results/phase1/logprob_check.json and every later phase must use
 # that same one.
 #
-# backend: llamacpp | vllm | ollama_native | auto
+# backend: gemini | llamacpp | vllm | ollama_native | auto
 #   auto -> try each entry of `fallback_order` until one returns real logprobs.
-backend: llamacpp
+backend: gemini
 
-fallback_order: [llamacpp, vllm, ollama_native]
+# Ollama is deliberately NOT in this chain (see ollama_native below).
+fallback_order: [gemini, llamacpp, vllm]
 
 backends:
-  # ---------------------------------------------------------------- PRIMARY --
+  # ---------------------------------------------------------------- HOSTED --
+  # Google Gemini. Needs GEMINI_API_KEY (see .env.example).
+  #
+  # !! MODEL RESTRICTION -- READ BEFORE CHANGING `model` !!
+  # responseLogprobs works on gemini-2.5-flash / gemini-2.5-pro.
+  # It does NOT work on the Gemini 3.x family (gemini-3-flash, gemini-3-pro):
+  # those either reject the request with "Logprobs is not supported for this
+  # model" or return a candidate with logprobsResult absent/null. Since this
+  # whole project measures model confidence, a model without logprobs is
+  # unusable here regardless of how good its text output is.
+  #
+  # `logprobs` is capped at 20 by the API, which comfortably covers our 8
+  # label tokens.
+  gemini:
+    endpoint: "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    model: "gemini-2.5-flash"     # verified to support logprobs
+    style: gemini
+    api_key_env: GEMINI_API_KEY
+    # 2.5-series models spend output tokens on internal "thinking" by default,
+    # which would eat our single allowed token. 0 disables it.
+    thinking_budget: 0
+
+  # ------------------------------------------------------- LOCAL FALLBACK --
   # llama.cpp server. CPU-only friendly, no GPU required.
   #   llama-server -m <path-to-gguf> -c 4096 --port 8080
   # Native /completion endpoint returns `completion_probabilities`, which is a
@@ -22,7 +45,7 @@ backends:
     model: "local-gguf"          # cosmetic label; llama.cpp serves one model
     style: llamacpp
 
-  # ------------------------------------------------------------- FALLBACK 1 --
+  # ------------------------------------------------------- LOCAL FALLBACK --
   # vLLM. Its OpenAI-compatible /v1/completions DOES genuinely support logprobs
   # (unlike Ollama's /v1 compat layer -- see the note on ollama_native below).
   #   vllm serve <model> --port 8000
@@ -32,7 +55,8 @@ backends:
     style: vllm
     echo: true                   # spec'd; harmless -- we read top_logprobs[-1]
 
-  # ------------------------------------------------------------- FALLBACK 2 --
+  # ----------------------------------------------------- NOT IN THE CHAIN --
+  # Kept for reference only; removed from fallback_order by request.
   # Ollama NATIVE /api/generate ONLY.
   #
   # NEVER point this at http://localhost:11434/v1/chat/completions. Ollama's

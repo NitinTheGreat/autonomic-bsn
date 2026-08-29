@@ -48,7 +48,28 @@ class LogprobError(RuntimeError):
 # --------------------------------------------------------------------------- #
 # config
 # --------------------------------------------------------------------------- #
+def load_dotenv(path: str | None = None) -> None:
+    """Load KEY=VALUE lines from .env into os.environ (no new dependency).
+
+    Real environment variables always win, so an exported key overrides the
+    file. Missing .env is fine -- keys can be exported instead.
+    """
+    path = path or os.path.join(REPO_ROOT, ".env")
+    if not os.path.isfile(path):
+        return
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key, val = key.strip(), val.strip().strip("'\"")
+            if key and key not in os.environ:
+                os.environ[key] = val
+
+
 def load_config(path: str | None = None) -> dict:
+    load_dotenv()
     path = path or os.path.join(REPO_ROOT, "configs", "models.yaml")
     with open(path, "r", encoding="utf-8") as fh:
         return yaml.safe_load(fh)
@@ -178,10 +199,72 @@ def _extract_ollama_native(resp: dict) -> list[tuple[str, float]]:
             if t.get("token") is not None and t.get("logprob") is not None]
 
 
+def _extract_gemini(resp: dict) -> list[tuple[str, float]]:
+    """Google Gemini generateContent with responseLogprobs.
+
+    IMPORTANT MODEL RESTRICTION
+    ---------------------------
+    logprobs works on gemini-2.5-flash / 2.5-pro. The Gemini 3.x family
+    (3-flash, 3-pro and later) does NOT support it: the API either rejects the
+    request with "Logprobs is not supported for this model" or returns a
+    candidate with logprobsResult absent / null. That is a silent-confidence
+    failure of exactly the kind this phase exists to catch, so we fail loudly
+    and name the fix rather than degrading to free-text parsing.
+    """
+    if "error" in resp:
+        err = resp["error"]
+        raise LogprobError(
+            "Gemini API error " + str(err.get("code", "?")) + ": " +
+            str(err.get("message", err))[:400] +
+            "\nIf this mentions logprobs not being supported, the model does "
+            "not expose them -- switch to gemini-2.5-flash."
+        )
+    cands = resp.get("candidates")
+    if not cands:
+        raise LogprobError(
+            "Gemini response has no `candidates` (blocked by a safety filter?): "
+            + repr(sorted(resp))[:300])
+
+    cand = cands[0]
+    lr = cand.get("logprobsResult")
+    if not lr:
+        finish = cand.get("finishReason", "?")
+        raise LogprobError(
+            "Gemini returned NO `logprobsResult` (finishReason=" + str(finish) +
+            ").\nThis model does not support logprobs. The Gemini 3.x family "
+            "(gemini-3-flash, gemini-3-pro) silently omits this field or "
+            "returns null.\nUse a model that does support it -- "
+            "gemini-2.5-flash is the documented, working choice -- or fall "
+            "back to the local llama.cpp backend.\n"
+            "Set backends.gemini.model in configs/models.yaml."
+        )
+    top = lr.get("topCandidates")
+    if not top:
+        raise LogprobError(
+            "Gemini logprobsResult has no `topCandidates` (only the chosen "
+            "token, which is not a distribution). Send logprobs: N with N>=2. "
+            "Keys were: " + repr(sorted(lr)))
+
+    first = top[0].get("candidates")
+    if not first:
+        raise LogprobError("Gemini topCandidates[0] has no `candidates` list")
+
+    out: list[tuple[str, float]] = []
+    for c in first:
+        tok, lp = c.get("token"), c.get("logProbability")
+        if tok is not None and lp is not None:
+            out.append((tok, float(lp)))
+    if not out:
+        raise LogprobError("Gemini returned candidates but none had a "
+                           "logProbability")
+    return out
+
+
 _EXTRACTORS = {
     "llamacpp": _extract_llamacpp,
     "vllm": _extract_vllm,
     "ollama_native": _extract_ollama_native,
+    "gemini": _extract_gemini,
 }
 
 
@@ -217,6 +300,24 @@ def _build_payload(style: str, cfg_b: dict, prompt: str, n_probs: int,
             "top_logprobs": n_probs,
             "options": {"temperature": temperature, "num_predict": 1},
         }
+    if style == "gemini":
+        # The API caps `logprobs` at 20; 8 label letters fit comfortably.
+        gen: dict = {
+            "temperature": temperature,
+            "maxOutputTokens": 1,
+            "responseLogprobs": True,
+            "logprobs": min(int(n_probs), 20),
+        }
+        # 2.5-series models spend output tokens on internal "thinking" by
+        # default, which would consume our single allowed token and return an
+        # empty candidate. Explicitly disable it.
+        budget = cfg_b.get("thinking_budget", 0)
+        if budget is not None:
+            gen["thinkingConfig"] = {"thinkingBudget": int(budget)}
+        return {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": gen,
+        }
     raise LogprobError("unknown backend style: " + repr(style))
 
 
@@ -225,20 +326,37 @@ def call_backend(cfg: dict, backend: str, prompt: str, n_probs: int) -> dict:
     if backend not in cfg.get("backends", {}):
         raise LogprobError("backend " + repr(backend) + " is not in models.yaml")
     cfg_b = cfg["backends"][backend]
-    endpoint = cfg_b["endpoint"]
-    _reject_ollama_compat(endpoint)
     style = cfg_b.get("style", backend)
+
+    # {model} lets a hosted endpoint carry the model in its path (Gemini does).
+    endpoint = cfg_b["endpoint"].replace("{model}", str(cfg_b.get("model", "")))
+    _reject_ollama_compat(endpoint)
+
+    headers, key_env = {}, cfg_b.get("api_key_env")
+    if key_env:
+        api_key = os.environ.get(key_env, "").strip()
+        if not api_key:
+            raise LogprobError(
+                backend + ": environment variable " + key_env + " is not set.\n"
+                "Copy .env.example to .env and put your key there, or export "
+                "it in the shell:\n  export " + key_env + "=your-key-here\n"
+                "(PowerShell:  $env:" + key_env + " = 'your-key-here')"
+            )
+        headers["x-goog-api-key"] = api_key
+
     payload = _build_payload(style, cfg_b, prompt, n_probs,
                              float(cfg["request"]["temperature"]))
     try:
-        r = requests.post(endpoint, json=payload,
+        r = requests.post(endpoint, json=payload, headers=headers,
                           timeout=float(cfg["request"]["timeout_s"]))
     except requests.RequestException as exc:
         raise LogprobError(
             backend + ": cannot reach " + endpoint + " -- " + str(exc)) from exc
     if r.status_code != 200:
+        # Surface the API's own message: it names the real cause (bad key,
+        # quota, or "Logprobs is not supported for this model").
         raise LogprobError(backend + ": HTTP " + str(r.status_code) + " from " +
-                           endpoint + ": " + r.text[:300])
+                           endpoint + ": " + r.text[:500])
     try:
         resp = r.json()
     except json.JSONDecodeError as exc:

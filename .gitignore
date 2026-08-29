@@ -9,6 +9,11 @@ data/raw/*
 results/
 frontend/results/
 
+# --- secrets: never commit API keys ---
+.env
+.env.*
+!.env.example
+
 # --- model weights ---
 *.gguf
 *.bin
