@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase 2 - Dataset Explorer</title>
+<link rel="stylesheet" href="shared/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 14px;
+    align-items: end;
+  }
+  .field label {
+    display: block;
+    font-size: .7rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 5px;
+  }
+  .field select {
+    width: 100%;
+    padding: 9px 11px;
+    background: #0c1020;
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-family: var(--font);
+    font-size: .88rem;
+  }
+  .field select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .node-card { margin-bottom: var(--gap); }
+  .node-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .node-head h3 { margin: 0; font-size: .95rem; text-transform: capitalize; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font-size: .64rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 20px;
+    border: 1px solid var(--border-strong);
+    color: var(--muted);
+  }
+  .chip.on { color: var(--accent); border-color: var(--accent); }
+  .chip.off {
+    color: var(--fail);
+    border-color: var(--fail);
+    border-style: dashed;
+  }
+  .chart-box { position: relative; height: 190px; }
+
+  .no-gyro {
+    border: 1px dashed var(--fail);
+    background: var(--fail-bg);
+    border-radius: var(--radius-sm);
+    padding: 11px 14px;
+    font-size: .82rem;
+    color: var(--text);
+    margin-top: 10px;
+  }
+  .no-gyro strong { color: var(--fail); }
+
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: .78rem;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle input { accent-color: var(--accent); cursor: pointer; }
+
+  table.cmp { border-collapse: collapse; width: 100%; font-size: .82rem; }
+  table.cmp th, table.cmp td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.cmp th { color: var(--muted); font-weight: 500; }
+  table.cmp th[scope="row"] { white-space: nowrap; width: 210px; }
+  table.cmp td { font-family: var(--mono); font-size: .78rem; }
+  table.cmp tr:last-child td, table.cmp tr:last-child th { border-bottom: 0; }
+  .yes { color: var(--pass); }
+  .no  { color: var(--fail); }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header class="page-head">
+    <div class="eyebrow">Phase 2</div>
+    <h1>Pluggable data layer &amp; dataset explorer</h1>
+    <p class="muted">
+      Every window below came through the same <code class="mono">DataSource</code>
+      contract that Phase 9's ESP32 hardware source will implement, so nothing
+      downstream can tell a replayed dataset from live nodes except by
+      <code class="mono">NodeFrame.source</code>. Traces are real sensor data:
+      2.56&nbsp;s windows, 50&nbsp;% overlap, never straddling an activity
+      change or a recording gap.
+    </p>
+  </header>
+
+  <section class="card">
+    <div class="card-title">
+      <h2>Sample window</h2>
+      <span class="small muted" id="sample-meta"></span>
+    </div>
+    <div id="controls-wrap"></div>
+  </section>
+
+  <div id="charts"></div>
+
+  <section class="card">
+    <div class="card-title">
+      <h2>Dataset comparison</h2>
+      <span class="small muted">results/phase2/dataset_stats.json</span>
+    </div>
+    <div id="stats"></div>
+  </section>
+</div>
+
+<script type="module">
+import { loadJSONAny, esc, fmt, notGenerated } from './shared/app.js';
+
+const SAMPLES = 'data/phase2_samples/';
+const STATS_PATHS = ['results/phase2/dataset_stats.json',
+                     '../results/phase2/dataset_stats.json'];
+
+const AXIS_COLORS = { x: '#3d8bc9', y: '#b0781f', z: '#9160ad' };
+const NODE_ORDER = ['wrist', 'chest', 'ankle'];
+
+const [manifest, stats] = await Promise.all([
+  loadJSONAny([SAMPLES + 'manifest.json']),
+  loadJSONAny(STATS_PATHS),
+]);
+
+/* ============================================================ explorer === */
+const controlsWrap = document.getElementById('controls-wrap');
+const chartsEl = document.getElementById('charts');
+const charts = [];
+
+if (!manifest || !manifest.datasets) {
+  notGenerated(controlsWrap, 'scripts/export_phase2_samples.py',
+               ['frontend/data/phase2_samples/manifest.json']);
+  notGenerated(chartsEl, 'scripts/export_phase2_samples.py',
+               ['frontend/data/phase2_samples/manifest.json']);
+} else {
+  controlsWrap.innerHTML = `
+    <div class="controls">
+      <div class="field"><label for="ds">Dataset</label>
+        <select id="ds"></select></div>
+      <div class="field"><label for="subj">Subject</label>
+        <select id="subj"></select></div>
+      <div class="field"><label for="act">Activity</label>
+        <select id="act"></select></div>
+      <div class="field">
+        <label for="gyro">Channels</label>
+        <span class="toggle"><input type="checkbox" id="gyro">
+          <label for="gyro" style="margin:0;text-transform:none;letter-spacing:0;font-size:.82rem">
+            show gyroscope</label></span>
+      </div>
+    </div>`;
+
+  const dsSel = document.getElementById('ds');
+  const subjSel = document.getElementById('subj');
+  const actSel = document.getElementById('act');
+  const gyroCb = document.getElementById('gyro');
+
+  const opts = (el, values, labelFn = (v) => v) => {
+    el.innerHTML = values.map((v) =>
+      `<option value="${esc(v)}">${esc(labelFn(v))}</option>`).join('');
+  };
+
+  // Dropdowns are populated from the manifest -- real availability, not a
+  // hardcoded list. An activity that failed to export simply is not offered.
+  const datasets = Object.keys(manifest.datasets);
+  opts(dsSel, datasets);
+
+  function fillSubjects() {
+    opts(subjSel, Object.keys(manifest.datasets[dsSel.value].subjects));
+    fillActivities();
+  }
+  function fillActivities() {
+    const acts = manifest.datasets[dsSel.value]
+      .subjects[subjSel.value].activities.map((a) => a.activity);
+    opts(actSel, acts);
+  }
+  function entry() {
+    return manifest.datasets[dsSel.value].subjects[subjSel.value]
+      .activities.find((a) => a.activity === actSel.value);
+  }
+
+  async function render() {
+    const e = entry();
+    if (!e) return;
+    const data = await loadJSONAny([SAMPLES + e.file]);
+    if (!data) {
+      notGenerated(chartsEl, 'scripts/export_phase2_samples.py',
+                   ['frontend/data/phase2_samples/' + e.file]);
+      return;
+    }
+
+    document.getElementById('sample-meta').innerHTML =
+      `${esc(data.dataset)} &middot; ${esc(data.subject)} &middot;
+       ${data.n_samples} samples &middot;
+       ${fmt(data.end_sec - data.start_sec, 2)}s &middot; accel in g`;
+
+    charts.forEach((c) => c.destroy());
+    charts.length = 0;
+
+    const showGyro = gyroCb.checked;
+    const nodes = NODE_ORDER.filter((n) => data.nodes[n]);
+
+    chartsEl.innerHTML = nodes.map((n) => {
+      const nd = data.nodes[n];
+      const chans = nd.channels_present.map((c) =>
+        `<span class="chip on">${esc(c)}</span>`).join('');
+      const missing = nd.has_gyro ? ''
+        : '<span class="chip off">no gyro</span>';
+      return `
+        <section class="card node-card">
+          <div class="node-head">
+            <h3>${esc(n)}</h3>
+            <div class="chips">${chans}${missing}</div>
+          </div>
+          <div class="chart-box"><canvas id="c-${esc(n)}"></canvas></div>
+          ${(!nd.has_gyro && showGyro) ? `
+            <div class="no-gyro">
+              <strong>No gyroscope on this node.</strong>
+              ${esc(data.dataset.toUpperCase())}'s ${esc(n)} node carries
+              ${esc(nd.channels_present.join(' + '))} only. This is a real
+              property of the dataset, not missing data &mdash; the value is
+              <code class="mono">null</code>, never zero, because a zero
+              reading would mean &ldquo;not rotating&rdquo; rather than
+              &ldquo;no sensor&rdquo;.
+            </div>` : ''}
+        </section>`;
+    }).join('');
+
+    for (const n of nodes) {
+      const nd = data.nodes[n];
+      const ds = [];
+      for (const ax of ['x', 'y', 'z']) {
+        ds.push({
+          label: `accel ${ax}`, data: nd.accel_g[ax],
+          borderColor: AXIS_COLORS[ax], borderWidth: 1.6,
+          pointRadius: 0, tension: 0.15, yAxisID: 'y',
+        });
+      }
+      if (showGyro && nd.has_gyro) {
+        for (const ax of ['x', 'y', 'z']) {
+          ds.push({
+            label: `gyro ${ax}`, data: nd.gyro_dps[ax],
+            borderColor: AXIS_COLORS[ax], borderWidth: 1.2,
+            borderDash: [4, 3], pointRadius: 0, tension: 0.15, yAxisID: 'y1',
+          });
+        }
+      }
+      const ctx = document.getElementById('c-' + n);
+      charts.push(new Chart(ctx, {
+        type: 'line',
+        data: { labels: nd.t, datasets: ds },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: 'index', intersect: false },
+          scales: {
+            x: {
+              ticks: { color: '#8b95b0', maxTicksLimit: 9,
+                       callback: (v, i) => nd.t[i]?.toFixed(1) },
+              grid: { color: 'rgba(232,236,247,0.06)' },
+              title: { display: true, text: 'seconds', color: '#8b95b0' },
+            },
+            y: {
+              ticks: { color: '#8b95b0' },
+              grid: { color: 'rgba(232,236,247,0.06)' },
+              title: { display: true, text: 'accel (g)', color: '#8b95b0' },
+            },
+            y1: {
+              display: showGyro && nd.has_gyro, position: 'right',
+              ticks: { color: '#8b95b0' }, grid: { drawOnChartArea: false },
+              title: { display: true, text: 'gyro (deg/s)', color: '#8b95b0' },
+            },
+          },
+          plugins: {
+            legend: { labels: { color: '#e8ecf7', boxWidth: 14,
+                                font: { size: 11 } } },
+            tooltip: { backgroundColor: '#0c1020', borderColor:
+                       'rgba(232,236,247,0.18)', borderWidth: 1 },
+          },
+        },
+      }));
+    }
+  }
+
+  dsSel.addEventListener('change', () => { fillSubjects(); render(); });
+  subjSel.addEventListener('change', () => { fillActivities(); render(); });
+  actSel.addEventListener('change', render);
+  gyroCb.addEventListener('change', render);
+
+  fillSubjects();
+  await render();
+}
+
+/* ====================================================== comparison table === */
+const statsEl = document.getElementById('stats');
+if (!stats || !stats.datasets) {
+  notGenerated(statsEl, 'scripts/profile_datasets.py',
+               ['results/phase2/dataset_stats.json']);
+} else {
+  const names = Object.keys(stats.datasets).filter(
+    (d) => stats.datasets[d].available);
+  const row = (label, fn) => `<tr><th scope="row">${esc(label)}</th>` +
+    names.map((d) => `<td>${fn(stats.datasets[d], d)}</td>`).join('') + '</tr>';
+  const num = (n) => Number(n).toLocaleString('en-US');
+
+  const chanCell = (d) => Object.entries(d.node_channels || {})
+    .map(([n, ch]) => {
+      const gy = ch.includes('gyro');
+      return `${esc(n)}: <span class="${gy ? 'yes' : 'no'}">${esc(ch.join('+'))}</span>`;
+    }).join('<br>');
+
+  const ref = stats.pamap2_reference_check;
+
+  statsEl.innerHTML = `
+    <div class="matrix-wrap">
+      <table class="cmp">
+        <thead><tr><th></th>${names.map((d) =>
+          `<th>${esc(d.toUpperCase())}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${row('Subjects', (d) => d.n_subjects)}
+          ${row('Sampling rate', (d) => d.sampling_rate_hz + ' Hz')}
+          ${row('Label set', (d) => `${esc(d.label_set)} (${d.n_classes})`)}
+          ${row('Node placements', (d) => Object.entries(d.node_placements || {})
+              .map(([n, p]) => `${esc(n)}: ${esc(p)}`).join('<br>'))}
+          ${row('Channels per node', chanCell)}
+          ${row('Timestamp', (d) => esc(d.timestamp_source))}
+          ${row('Total raw rows', (d) => num(d.total_raw_rows))}
+          ${row('Total duration', (d) => fmt(d.total_duration_hours, 1) + ' h')}
+          ${row('Windows (2.56s / 50%)', (d) => num(d.total_windows))}
+          ${row('Windows per class', (d) => Object.entries(d.windows_per_class)
+              .map(([k, v]) => `${esc(k)}: ${num(v)}`).join('<br>'))}
+        </tbody>
+      </table>
+    </div>
+    ${ref ? `<div class="legend-note" style="margin-top:14px">
+      <span class="${ref.assertion_passed ? 'yes' : 'no'}">
+        ${ref.assertion_passed ? '&#10003;' : '&#10007;'}</span>
+      PAMAP2 reference check: ${num(ref.actual)} windows vs Phase 1's
+      ${num(ref.reference)} (${ref.delta >= 0 ? '+' : ''}${ref.delta},
+      ${fmt(ref.delta_pct, 3)}%), tolerance &plusmn;${ref.tolerance_pct}%
+    </div>` : ''}
+    <div class="notice" style="margin-top:14px">
+      ${esc(stats.schema_note || '')}
+    </div>`;
+}
+</script>
+
+</body>
+</html>

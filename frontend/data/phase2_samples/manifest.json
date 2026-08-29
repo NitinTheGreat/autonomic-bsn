@@ -1,0 +1,194 @@
+{
+  "generated_by": "scripts/export_phase2_samples.py",
+  "phase": 2,
+  "units": {
+    "accel": "g",
+    "gyro": "deg/s"
+  },
+  "note": "A node with no gyroscope exports gyro_dps: null -- never zeros. MHEALTH's chest node has accel + ECG only.",
+  "datasets": {
+    "pamap2": {
+      "subjects": {
+        "subject101": {
+          "activities": [
+            {
+              "activity": "lying",
+              "file": "pamap2_subject101_lying.json",
+              "n_samples": 256,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": []
+            },
+            {
+              "activity": "sitting",
+              "file": "pamap2_subject101_sitting.json",
+              "n_samples": 256,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": []
+            },
+            {
+              "activity": "standing",
+              "file": "pamap2_subject101_standing.json",
+              "n_samples": 252,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": []
+            },
+            {
+              "activity": "walking",
+              "file": "pamap2_subject101_walking.json",
+              "n_samples": 239,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": []
+            },
+            {
+              "activity": "running",
+              "file": "pamap2_subject101_running.json",
+              "n_samples": 254,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": []
+            },
+            {
+              "activity": "cycling",
+              "file": "pamap2_subject101_cycling.json",
+              "n_samples": 255,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": []
+            },
+            {
+              "activity": "ascending_stairs",
+              "file": "pamap2_subject101_ascending_stairs.json",
+              "n_samples": 256,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": []
+            },
+            {
+              "activity": "descending_stairs",
+              "file": "pamap2_subject101_descending_stairs.json",
+              "n_samples": 256,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": []
+            }
+          ]
+        }
+      }
+    },
+    "mhealth": {
+      "subjects": {
+        "subject1": {
+          "activities": [
+            {
+              "activity": "lying",
+              "file": "mhealth_subject1_lying.json",
+              "n_samples": 128,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": [
+                "chest"
+              ]
+            },
+            {
+              "activity": "sitting",
+              "file": "mhealth_subject1_sitting.json",
+              "n_samples": 128,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": [
+                "chest"
+              ]
+            },
+            {
+              "activity": "standing",
+              "file": "mhealth_subject1_standing.json",
+              "n_samples": 128,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": [
+                "chest"
+              ]
+            },
+            {
+              "activity": "walking",
+              "file": "mhealth_subject1_walking.json",
+              "n_samples": 128,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": [
+                "chest"
+              ]
+            },
+            {
+              "activity": "running",
+              "file": "mhealth_subject1_running.json",
+              "n_samples": 128,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": [
+                "chest"
+              ]
+            },
+            {
+              "activity": "cycling",
+              "file": "mhealth_subject1_cycling.json",
+              "n_samples": 128,
+              "nodes": [
+                "ankle",
+                "chest",
+                "wrist"
+              ],
+              "nodes_without_gyro": [
+                "chest"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "n_samples_exported": 14
+}
