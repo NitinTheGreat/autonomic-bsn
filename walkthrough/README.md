@@ -11,6 +11,7 @@ verified, what is still open, and how to start the next phase.
 |---|---|
 | [`phase1.md`](phase1.md) | Phase 1 — foundational de-risking |
 | [`phase2.md`](phase2.md) | Phase 2 — pluggable data layer & dataset explorer |
+| [`phase3.md`](phase3.md) | Phase 3 — failure injection lab |
 | … | … |
 
 ## What every phase document must contain

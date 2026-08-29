@@ -102,6 +102,42 @@ Full detail: **[`walkthrough/phase2.md`](walkthrough/phase2.md)**.
 
 ---
 
+## Phase 3 — failure injection lab
+
+Five failure modes, each a `DataSource` **decorator**: it wraps any source and
+is itself a valid source, so injectors compose with the dataset replay, with
+each other, and with Phase 9's hardware unchanged. **Zero LLM calls.**
+
+```bash
+python scripts/verify_injectors.py         # -> results/phase3/injector_verification.json
+python scripts/export_phase3_samples.py    # -> 100 paired clean/injected traces
+python tests/test_injection.py             # 71 assertions
+```
+
+| | Failure | Severity 1 → 4 |
+|---|---|---|
+| F1 | `dropout` | blanks last 25 / 50 / 75 / 100 % of the window |
+| F2 | `clock_desync` | 50 / 200 / 500 / 2000 ms offset |
+| F3 | `packet_loss` | Gilbert-Elliott (L, B) = (.05,3) (.15,4) (.30,6) (.50,8) |
+| F4 | `rate_degradation` | native ÷ 2 / 4 / 8 / 16, zero-order hold |
+| F5 | `displacement` | 15 / 30 / 45 / 90° sensor-frame rotation |
+
+> **Three states, kept distinct.** Valid sample → `(x,y,z)`; dropped sample →
+> tuple of **NaN**; no such sensor → **`None`**. No injector may ever write
+> `None`, and blanked samples are never zero — zero is a real stationary
+> reading a model may believe. `rate_degradation` emits **zero NaNs** (stale
+> but present) while `packet_loss` emits gaps (absent); Phase 4 must tell them
+> apart.
+
+Two calibration findings are documented in the walkthrough: displacement's
+realised angle is **posture-dependent** (a requested 15° realises as 2.3–14.9°
+depending on gravity/axis alignment), and the 10,000-step Gilbert-Elliott check
+is **statistically underpowered** at severity 4.
+
+Full detail: **[`walkthrough/phase3.md`](walkthrough/phase3.md)**.
+
+---
+
 ## Model backends — read this before changing the model
 
 The only thing this project needs from a model is a **real next-token
@@ -198,6 +234,11 @@ datasets/
   pamap2_loader.py      full 54-column map, rad/s -> deg/s
   mhealth_loader.py     24-column map, derived clock, absent-gyro handling
   dataset_replay_source.py   reference DataSource implementation
+injection/
+  base.py               FailureInjector decorator + strategy ABC
+  dropout.py clock_desync.py packet_loss.py
+  rate_degradation.py displacement.py
+  registry.py           type -> class map; Phase 6 iterates this
 scripts/
   _llm_client.py        THE shared logprob extraction path (all backends)
   check_logprobs.py     gate 1
