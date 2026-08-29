@@ -138,6 +138,42 @@ Full detail: **[`walkthrough/phase3.md`](walkthrough/phase3.md)**.
 
 ---
 
+## Phase 4 — health monitor
+
+Detects and diagnoses node degradation from observable signal statistics
+**alone**. **Zero LLM calls.**
+
+```bash
+python scripts/run_detection_eval.py       # -> results/phase4/detection_metrics.json
+python scripts/export_phase4_samples.py    # -> per-sample monitor verdicts
+python tests/test_health.py                # 70 assertions
+```
+
+| Failure | F1 | | Failure | F1 |
+|---|---|---|---|---|
+| `dropout` | **0.960** | | `packet_loss` | **0.805** |
+| `rate_degradation` | **0.960** | | `displacement` | 0.595 |
+| `clock_desync` | **0.960** | | **FPR (clean)** | **0.067** |
+
+Diagnosis accuracy across the 6 classes: **0.880**.
+
+> **The blind is mechanical, not a convention.** The monitor receives a
+> `BlindWindow`: `injected_failure`, the true activity label and every
+> injection field are stripped and **raise** on access — returning `None`
+> would let buggy code read nothing and still look correct. A grep test
+> confirms the ground-truth identifiers appear nowhere in `signals.py` or
+> `diagnose.py`. Only `score_detection.py` reads truth, after the fact.
+
+**Displacement is weakly detected, and that is a finding.** A rotation about a
+node's long axis is only partly observable in gravity
+(`cos(obs) = cos²φ + sin²φ·cos θ`), and natural posture swing exceeds the
+rotation's own effect — so it is *not reliably detectable from gravity alone*.
+Detecting it needs a temporal baseline or a second modality.
+
+Full detail: **[`walkthrough/phase4.md`](walkthrough/phase4.md)**.
+
+---
+
 ## Model backends — read this before changing the model
 
 The only thing this project needs from a model is a **real next-token
@@ -234,6 +270,11 @@ datasets/
   pamap2_loader.py      full 54-column map, rad/s -> deg/s
   mhealth_loader.py     24-column map, derived clock, absent-gyro handling
   dataset_replay_source.py   reference DataSource implementation
+health/
+  window_view.py        BlindWindow -- the mechanical blind, built first
+  signals.py            observable signals (no ground truth, grep-verified)
+  diagnose.py           auditable if/elif ladder + evidence
+  score_detection.py    the ONLY module that reads ground truth
 injection/
   base.py               FailureInjector decorator + strategy ABC
   dropout.py clock_desync.py packet_loss.py
