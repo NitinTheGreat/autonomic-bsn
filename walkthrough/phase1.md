@@ -107,18 +107,19 @@ code is correct and fails loudly with the API's own message -- which is exactly
 what this phase was built to catch -- but a different backend is required.
 
 Since this project measures model confidence, a model without logprobs is
-unusable here **regardless of how good its text output is**. The config
-therefore defaults to `gemini-2.5-flash`, and the extractor fails loudly naming
-the fix if `logprobsResult` is missing.
+unusable here **regardless of how good its text output is**.
 
-> **Open decision for the user.** If Gemini 3 Flash is required for other
-> reasons, Phase 1 Step 1 cannot pass with it and the confidence-based research
-> question needs rethinking. See "Open questions".
+> **Open decision for the user.** Gate 1 needs either Vertex AI (same Gemini
+> models, different surface, needs a GCP project + billing + service-account
+> auth) or a local backend (llama.cpp / vLLM, already implemented and tested).
+> See "Open questions".
 
-Two further Gemini details that are easy to get wrong:
-- `thinkingConfig.thinkingBudget: 0` is set, because 2.5-series models
-  otherwise spend the single allowed output token on internal reasoning and
-  return an empty candidate.
+The Gemini backend code is kept and is correct -- if the account is later
+enabled for logprobs, or is pointed at Vertex, it will work unchanged. Two
+details in it that are easy to get wrong:
+- `thinkingConfig.thinkingBudget: 0`, because 2.5-series models otherwise spend
+  the single allowed output token on internal reasoning and return an empty
+  candidate.
 - `logprobs` is capped at **20**, which comfortably covers the 8 label tokens.
 
 ---
@@ -147,20 +148,27 @@ Two further Gemini details that are easy to get wrong:
 | Gemini good response | identical distribution — shared softmax confirmed |
 | Uniform distribution | **rejected** (the anti-noise guard fires) |
 | Missing logprob field | fails loudly |
-| Gemini 3-style missing `logprobsResult` | fails loudly, names the fix |
+| Gemini-style missing `logprobsResult` | fails loudly, names the fix |
 | Ollama `/v1` endpoint | hard-refused |
 | Missing `GEMINI_API_KEY` | actionable message |
 | Corrupted label map (ID removed + undocumented ID injected) | both caught, exit 1 |
 | Frontend render | 13/13 results panels, 13/13 dataset panels, 7/7 empty-state, malformed-profile recovery |
 
-### NOT verified ❌
+### Tested against the LIVE Gemini API ❌ (key supplied 2026-08-29)
 
-- **Whether the model returns real logprobs in practice** — needs an API key.
-- **Whether baseline accuracy reaches 0.65** — needs a working backend.
+| Claim | Outcome |
+|---|---|
+| Gemini returns usable logprobs | **NO** — all 12 probed models return `400 "Logprobs is not enabled for this model"` |
+| Gemini generates text at all | yes, `200 OK` — isolating logprobs as the blocker |
+| The client handles it correctly | yes — surfaces the API's own message and refuses to proceed |
 
-Neither can be inferred from the mock results. `results/phase1/logprob_check.json`
-currently holds a genuine `pass: false` from a run with no backend reachable.
-**No results were fabricated at any point.**
+### Still NOT answered ❌
+
+- **Gate 1 (logprob extraction)** — needs Vertex AI or a local backend.
+- **Gate 2 (baseline accuracy)** — blocked behind Gate 1.
+
+`results/phase1/logprob_check.json` holds a genuine `pass: false` recording the
+real API rejection. **No results were fabricated at any point.**
 
 ---
 
@@ -221,8 +229,10 @@ at runtime — the script aborts if they overlap).
 
 ## 7. Current blockers
 
-1. **`GEMINI_API_KEY` is not set.** Copy `.env.example` to `.env` and add a key
-   from <https://aistudio.google.com/apikey>.
+1. **A backend that actually exposes logprobs.** The Gemini Developer API does
+   not (see 3.2). `GEMINI_API_KEY` is set and valid, but every model rejects
+   logprobs. Switch `backend:` in `configs/models.yaml` to `llamacpp` and run
+   `llama-server -m <gguf> -c 4096 --port 8080`, or add a Vertex AI backend.
 2. Then run, in order:
    ```bash
    python scripts/check_logprobs.py            # must PASS before anything else
@@ -239,8 +249,10 @@ Act on that ranking rather than guessing.
 
 ## 8. Open questions for the user
 
-1. **Gemini 3 Flash cannot provide logprobs.** Confirm `gemini-2.5-flash` is
-   acceptable, or decide the project uses a local llama.cpp model instead.
+1. **No Gemini model on the Developer API can provide logprobs** (tested, not
+   assumed). Choose: Vertex AI (GCP project, billing, service-account auth) or
+   a local model via llama.cpp / vLLM (free, already implemented, and what the
+   original brief specified).
 2. **Hosted vs local.** The original brief specified a *local* LLM. Moving to a
    hosted API changes cost, reproducibility and rate-limiting characteristics,
    and means ~150 sequential calls per accuracy run. Worth an explicit decision
