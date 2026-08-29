@@ -71,17 +71,27 @@ log-probability distribution**. Several popular endpoints return `200 OK` with
 no usable confidence data, which fails *invisibly*. Two such traps are guarded
 in code:
 
-### ⚠️ Gemini 3.x does not support logprobs
+### ⚠️ The Gemini Developer API does not expose logprobs
 
-`responseLogprobs` works on **`gemini-2.5-flash`** and `gemini-2.5-pro`.
-It does **not** work on the **Gemini 3.x family** (`gemini-3-flash`,
-`gemini-3-pro`), which either rejects the request with *"Logprobs is not
-supported for this model"* or returns a candidate with `logprobsResult`
-absent/null.
+**Verified against the live API, not just the docs.** All 12 probed models --
+`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-flash-latest`,
+`gemini-3-flash-preview`, `gemini-3.5-flash`, `gemini-3.7-flash`,
+`gemma-4-31b-it` and others -- return:
 
-A model without logprobs is unusable for this project regardless of how good
-its text output is. The default is therefore `gemini-2.5-flash`, and the client
-fails loudly naming the fix if the field is missing.
+```
+400  "Logprobs is not enabled for this model"
+```
+
+while returning `200 OK` for ordinary generation. The failure persists without
+`thinkingConfig`, so logprobs itself is the blocker.
+
+This gates the **Developer API surface** (`generativelanguage.googleapis.com`,
+AI Studio keys). Google's logprobs guide targets **Vertex AI**
+(`aiplatform.googleapis.com`) -- a different surface needing a GCP project,
+billing and service-account auth.
+
+**A model without logprobs cannot be used for this project**, however good its
+text output is. Use a local backend (`llamacpp`, `vllm`) or Vertex AI.
 
 ### ⚠️ Never use Ollama's OpenAI-compat endpoint
 

@@ -78,14 +78,33 @@ answers `200 OK` with a normal-looking body and no confidence data.
 Ollama's *native* `/api/generate` gained logprobs only recently, so the client
 verifies the field is present and fails loudly rather than degrading.
 
-### 3.2 Gemini 3.x does not support logprobs
+### 3.2 The Gemini Developer API does not expose logprobs AT ALL
 
-The request was to use **Gemini 3 Flash**. It cannot be used for this project:
+Originally flagged from documentation as a Gemini-3-only limitation. **Tested
+against the live API on 2026-08-29 with a real key, this is far broader:**
 
-- `responseLogprobs` works on **gemini-2.5-flash / 2.5-pro**.
-- The **Gemini 3.x family** (`gemini-3-flash`, `gemini-3-pro`) either rejects
-  the request with *"Logprobs is not supported for this model"* or returns a
-  candidate with `logprobsResult` absent/null.
+Every one of 12 probed models -- including `gemini-2.5-flash`,
+`gemini-2.5-pro`, `gemini-flash-latest`, `gemini-3-flash-preview`,
+`gemini-3.5-flash`, `gemini-3.7-flash` and `gemma-4-31b-it` -- rejects the
+request with:
+
+```
+400  "Logprobs is not enabled for this model"
+```
+
+The same models return `200 OK` for plain generation, and the failure persists
+with `thinkingConfig` removed, so **logprobs specifically is the blocker**, not
+the request shape or the thinking budget.
+
+This is a gate on the Gemini **Developer API surface**
+(`generativelanguage.googleapis.com`, AI Studio keys), not a per-model quirk.
+Google's own logprobs walkthrough is published for **Vertex AI**
+(`aiplatform.googleapis.com`), which is a different surface requiring a GCP
+project, billing and service-account auth.
+
+**Consequence: the Gemini backend as configured cannot satisfy Gate 1.** The
+code is correct and fails loudly with the API's own message -- which is exactly
+what this phase was built to catch -- but a different backend is required.
 
 Since this project measures model confidence, a model without logprobs is
 unusable here **regardless of how good its text output is**. The config
