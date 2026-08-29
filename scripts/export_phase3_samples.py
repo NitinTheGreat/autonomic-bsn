@@ -163,10 +163,16 @@ def main() -> int:
                             "requested": injected_w.meta["requested"],
                             "realised": injected_w.meta["realised"],
                         },
+                        # Untouched nodes are bit-identical to `clean` by
+                        # construction (asserted in tests), so storing them
+                        # twice proves nothing and tripled the payload. Only
+                        # the target node's after-trace is kept; the frontend
+                        # falls back to `clean` for every other node.
                         "clean": {n: node_payload(clean_w.frames[n])
                                   for n in clean_w.frames},
-                        "injected": {n: node_payload(injected_w.frames[n])
-                                     for n in injected_w.frames},
+                        "injected": {target: node_payload(
+                            injected_w.frames[target])},
+                        "injected_nodes": [target],
                     }
                     fname = "%s_%s_%s_sev%d.json" % (dataset, activity, ftype, sev)
                     with open(os.path.join(args.out_dir, fname), "w",

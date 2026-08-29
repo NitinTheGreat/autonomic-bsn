@@ -142,6 +142,14 @@
 
   <section class="card">
     <div class="card-title">
+      <h2>Health monitor verdict</h2>
+      <span class="small muted">Phase 4 &middot; computed from the signal alone</span>
+    </div>
+    <div id="health"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">
       <h2>Gilbert&ndash;Elliott calibration</h2>
       <span class="small muted">target vs realised, per severity</span>
     </div>
@@ -159,10 +167,65 @@ const VERIF_PATHS = ['results/phase3/injector_verification.json',
 const AXIS_COLORS = { x: '#3d8bc9', y: '#b0781f', z: '#9160ad' };
 const NODE_ORDER = ['wrist', 'chest', 'ankle'];
 
-const [manifest, verif] = await Promise.all([
+const [manifest, verif, health] = await Promise.all([
   loadJSONAny([SAMPLES + 'manifest.json']),
   loadJSONAny(VERIF_PATHS),
+  loadJSONAny(['data/phase4_samples/verdicts.json']),
 ]);
+
+const SUB_COLOR = (v) => v > 0.9 ? 'var(--pass)'
+  : v > 0.6 ? 'var(--accent)' : v > 0.2 ? '#e8763d' : 'var(--fail)';
+const STATE_COLOR = { HEALTHY: 'var(--pass)', DEGRADED: 'var(--accent)',
+                      UNRELIABLE: '#e8763d', OFFLINE: 'var(--fail)' };
+
+/* Waveform and verdict side by side -- the monitor saw only the signal. */
+function renderHealth(file) {
+  const el = document.getElementById('health');
+  if (!health || !health.verdicts) {
+    notGenerated(el, 'scripts/export_phase4_samples.py',
+                 ['frontend/data/phase4_samples/verdicts.json']);
+    return;
+  }
+  const v = health.verdicts[file];
+  if (!v) {
+    el.innerHTML = '<div class="notice">No verdict exported for this ' +
+      'combination. Re-run <code>scripts/export_phase4_samples.py</code>.</div>';
+    return;
+  }
+  el.innerHTML = '<div style="display:grid;grid-template-columns:' +
+    'repeat(auto-fit,minmax(260px,1fr));gap:14px">' +
+    ['wrist', 'chest', 'ankle'].filter((n) => v.nodes[n]).map((n) => {
+      const nd = v.nodes[n];
+      const col = STATE_COLOR[nd.state] || 'var(--muted)';
+      return `<div style="background:rgba(232,236,247,.04);border:1px solid
+          var(--border);border-left:4px solid ${col};border-radius:10px;
+          padding:13px 15px">
+        <div style="display:flex;justify-content:space-between;
+          align-items:baseline">
+          <strong style="text-transform:capitalize">${esc(n)}</strong>
+          <span style="color:${col};font-size:.66rem;letter-spacing:.09em;
+            border:1px solid ${col};border-radius:20px;padding:1px 8px">${
+            esc(nd.state)}</span></div>
+        <div class="mono" style="color:var(--accent);margin:7px 0 2px">${
+          esc(nd.diagnosis)}</div>
+        <div class="small muted" style="margin-bottom:9px">${
+          esc(nd.evidence.rule || '')}</div>
+        ${Object.entries(nd.sub_scores).map(([k, val]) => `
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:4px">
+            <span style="width:88px;font-size:.7rem;color:var(--muted)">${
+              esc(k)}</span>
+            <span style="flex:1;height:8px;background:rgba(232,236,247,.07);
+              border-radius:4px;overflow:hidden"><span style="display:block;
+              height:100%;width:${(val * 100).toFixed(1)}%;background:${
+              SUB_COLOR(val)}"></span></span>
+            <span class="mono" style="width:38px;text-align:right;
+              font-size:.7rem">${fmt(val, 2)}</span></div>`).join('')}
+      </div>`;
+    }).join('') + '</div>' +
+    '<div class="legend-note" style="margin-top:11px">The monitor received a ' +
+    'BlindWindow: no ground truth, no activity label. Compare its verdict with ' +
+    'the waveform above and the true tag on the left.</div>';
+}
 
 const charts = [];
 const controlsWrap = document.getElementById('controls-wrap');
@@ -328,9 +391,13 @@ if (!manifest || !manifest.datasets) {
       }));
     };
 
+    renderHealth(file);
+
     for (const n of nodes) {
       mk('b-' + n, d.clean[n], d.clean[n].t);
-      mk('a-' + n, d.injected[n], d.clean[n].t);
+      // Untouched nodes are not re-stored on the injected side --
+      // they are bit-identical by construction, so fall back to clean.
+      mk('a-' + n, d.injected[n] || d.clean[n], d.clean[n].t);
     }
   }
 
