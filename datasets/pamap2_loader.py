@@ -15,14 +15,24 @@ Layout
 Each 17-column IMU block, relative to its start:
     +0            temperature (C)
     +1,+2,+3      accel, +/-16 g scale (m/s^2)   <- USED
-    +4,+5,+6      accel, +/-6 g scale (m/s^2)    <- NOT used: saturates during
-                                                    vigorous motion (running,
-                                                    rope jumping), which is
-                                                    exactly where we need
-                                                    valid readings
+    +4,+5,+6      accel, +/-6 g scale (m/s^2)    <- NOT used, but see below
     +7,+8,+9      gyroscope (rad/s)
     +10,+11,+12   magnetometer (uT)
     +13..+16      orientation -- INVALID per the dataset's own readme; never use
+
+Why accel16 and not accel6 -- MEASURED, not assumed
+---------------------------------------------------
+The usual claim is that the +/-6 g channel "saturates during vigorous motion".
+Measured on subject101 running (wrist, 21,007 rows) that is OVERSTATED: accel6
+reports up to 6.33 g and only 0.10 % of its samples sit at or beyond the +/-6 g
+rail, so it does not hard-clip and tracks accel16 closely.
+
+The real reason to prefer accel16 is narrower but still valid: peak
+accelerations genuinely exceed the 6 g rail (6.75 g observed on the same run),
+so accel6 cannot represent the extremes. Those peaks are exactly the samples
+that separate running from walking, and they matter more once degradation
+compresses the signal. accel16 is the safe choice; the difference is small, not
+dramatic.
 
 Unit conversion (applied here so datasets and hardware agree downstream)
 ------------------------------------------------------------------------

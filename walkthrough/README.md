@@ -10,7 +10,7 @@ verified, what is still open, and how to start the next phase.
 | File | Phase |
 |---|---|
 | [`phase1.md`](phase1.md) | Phase 1 — foundational de-risking |
-| `phase2.md` | Phase 2 — DataSource + parser *(not yet written)* |
+| [`phase2.md`](phase2.md) | Phase 2 — pluggable data layer & dataset explorer |
 | … | … |
 
 ## What every phase document must contain

@@ -66,6 +66,42 @@ Full detail, including everything verified and everything still open:
 
 ---
 
+## Phase 2 — pluggable data layer & dataset explorer
+
+Implements the `DataSource` contract every later phase plugs into — including
+Phase 9's ESP32/BLE hardware source, which must satisfy it unchanged. Backed by
+real PAMAP2 and MHEALTH data. **Makes zero LLM calls**, so it is not blocked by
+Phase 1's unpassed gates.
+
+```bash
+python scripts/verify_labels.py           # label-map cross-check, both datasets
+python scripts/profile_datasets.py        # -> results/phase2/dataset_stats.json
+python scripts/export_phase2_samples.py   # -> frontend sample waveforms
+python tests/test_datasource.py           # 47 assertions against real data
+```
+
+| | PAMAP2 | MHEALTH |
+|---|---|---|
+| Subjects / rate | 9 @ 100 Hz | 10 @ 50 Hz |
+| Label set | PAMAP2_8 | CANONICAL_6 |
+| Rows / duration | 2,872,533 / 8.0 h | 1,215,745 / 6.8 h |
+| Windows (2.56 s, 50 %) | **9,909** | **2,760** |
+| Timestamp | measured | **derived** from row index |
+| chest channels | accel + gyro + mag | **accel + ECG only** |
+
+The rebuilt parser reproduces Phase 1's verified 9,909 windows **exactly**
+(delta +0, 0.000 %).
+
+> **Absent sensor is not a zero reading.** `gyro_dps` is `None` when a node has
+> no gyroscope (MHEALTH's chest) and is *never* zero-filled. A node that has a
+> gyro but dropped a sample carries `NaN` — a third, distinct state. Collapsing
+> these would fabricate a "sensor reads zero" signal inside the degradation
+> study this project exists to run.
+
+Full detail: **[`walkthrough/phase2.md`](walkthrough/phase2.md)**.
+
+---
+
 ## Model backends — read this before changing the model
 
 The only thing this project needs from a model is a **real next-token
@@ -155,11 +191,21 @@ is silently truncated from the left, which quietly destroys accuracy.
 
 ```
 configs/models.yaml     backend selection + all tunable parameters
+core/
+  datasource.py         THE DataSource contract (NodeFrame, Window, Protocol)
+  labels.py             label sets, ID maps, deliberate exclusions
+datasets/
+  pamap2_loader.py      full 54-column map, rad/s -> deg/s
+  mhealth_loader.py     24-column map, derived clock, absent-gyro handling
+  dataset_replay_source.py   reference DataSource implementation
 scripts/
   _llm_client.py        THE shared logprob extraction path (all backends)
   check_logprobs.py     gate 1
   check_baseline_accuracy.py  gate 2
-  profile_dataset.py    dataset profile for the dashboard (no LLM needed)
+  profile_dataset.py    Phase 1 dataset profile (no LLM needed)
+  verify_labels.py      Phase 2 label-map cross-check
+  profile_datasets.py   Phase 2 Table 1
+  export_phase2_samples.py   frontend sample waveforms
 frontend/               dashboard (no frameworks, no build step)
 walkthrough/            one handoff document per phase
 data/raw/               datasets (gitignored; see data/raw/README.md)
