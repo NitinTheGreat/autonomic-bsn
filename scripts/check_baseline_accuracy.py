@@ -136,8 +136,15 @@ def load_subject(data_dir: str, subject: int) -> pd.DataFrame | None:
     names = ["timestamp", "activityID"]
     for node in NODE_COLS:
         names.extend(["%s_%s" % (node, a) for a in AXES])
-    df = pd.read_csv(path, sep=r"\s+", header=None, usecols=usecols,
-                     names=names, na_values=["NaN"], engine="python")
+    # PAMAP2 is single-space separated, so the fast C parser handles it (~1.6 s
+    # per subject). Fall back to the regex/python engine only if that fails,
+    # since a regex separator is ~10x slower over 376k rows.
+    try:
+        df = pd.read_csv(path, sep=" ", header=None, usecols=usecols,
+                         names=names, na_values=["NaN"])
+    except Exception:
+        df = pd.read_csv(path, sep=r"\s+", header=None, usecols=usecols,
+                         names=names, na_values=["NaN"], engine="python")
     df["subject"] = subject
     return df
 
