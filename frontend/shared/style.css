@@ -316,3 +316,110 @@ pre.prompt {
 
 .viewer { flex: 1; min-width: 0; background: var(--bg); }
 .viewer iframe { width: 100%; height: 100%; border: 0; display: block; }
+
+/* ======================================================= dataset panels === */
+/* Stat tiles: a headline number needs no chart. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+.tile {
+  background: rgba(232, 236, 247, 0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+.tile .n {
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1.15;
+  font-family: var(--mono);
+  color: var(--accent);
+}
+.tile .k {
+  font-size: .7rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* Per-subject x activity grid -- same single-hue sequential ramp as the
+   confusion matrix, so intensity reads consistently across the page. */
+table.heat { border-collapse: separate; border-spacing: 2px; font-size: .72rem; }
+table.heat th {
+  color: var(--muted);
+  font-weight: 500;
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+table.heat th.row-head { text-align: right; }
+table.heat th.col-head {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  height: 96px;
+  vertical-align: bottom;
+}
+table.heat td {
+  min-width: 44px;
+  height: 26px;
+  text-align: center;
+  border-radius: 4px;
+  font-family: var(--mono);
+  color: var(--text);
+  background: rgba(232, 236, 247, 0.04);
+}
+table.heat td.excluded { outline: 1px dashed rgba(232, 236, 247, 0.22); }
+
+/* Raw signal traces */
+.traces {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 6px;
+}
+.trace-card {
+  background: rgba(232, 236, 247, 0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+}
+.trace-card h3 {
+  margin: 0 0 2px;
+  font-size: .85rem;
+  color: var(--text);
+}
+.trace-card .who { font-size: .7rem; color: var(--muted); margin-bottom: 8px; }
+.trace-row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.trace-row .node {
+  width: 40px;
+  font-size: .66rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.trace-row svg { flex: 1; display: block; height: 34px; }
+
+/* x / y / z axis identity. Validated against the dark panel:
+   lightness band 0.48-0.67, CVD deutan dE 21.4 / tritan 9.2, contrast >= 3:1.
+   Always paired with the direct labels in .axis-key, never colour alone. */
+.axis-x { stroke: #3d8bc9; }
+.axis-y { stroke: #b0781f; }
+.axis-z { stroke: #9160ad; }
+
+.axis-key {
+  display: flex;
+  gap: 14px;
+  font-size: .72rem;
+  color: var(--muted);
+  margin-top: 10px;
+}
+.axis-key i {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  vertical-align: middle;
+  margin-right: 5px;
+}

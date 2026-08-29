@@ -28,6 +28,39 @@
       <div class="verdict">Loading&hellip;</div></div>
   </section>
 
+  <!-- ------------------------------------------------ dataset ----------- -->
+  <section class="card">
+    <div class="card-title">
+      <h2>Dataset</h2>
+      <span class="small muted" id="ds-meta"></span>
+    </div>
+    <div id="ds-tiles"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">
+      <h2>Windows per class</h2>
+      <span class="small muted">2.56 s windows, 50 % overlap, single-activity segments</span>
+    </div>
+    <div id="ds-windows"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">
+      <h2>Rows per subject &times; activity</h2>
+      <span class="small muted">dashed outline = excluded from the 8-class set</span>
+    </div>
+    <div id="ds-heat"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">
+      <h2>Raw accelerometer traces</h2>
+      <span class="small muted" id="ds-trace-meta"></span>
+    </div>
+    <div id="ds-traces"></div>
+  </section>
+
   <!-- ------------------------------------------------ logprob dist ------ -->
   <section class="card">
     <div class="card-title">
@@ -80,10 +113,130 @@ const LOGPROB_PATHS  = ['results/phase1/logprob_check.json',
 const BASELINE_PATHS = ['results/phase1/baseline_accuracy.json',
                         '../results/phase1/baseline_accuracy.json'];
 
-const [lp, base] = await Promise.all([
+const PROFILE_PATHS  = ['results/phase1/dataset_profile.json',
+                        '../results/phase1/dataset_profile.json'];
+
+const [lp, base, ds] = await Promise.all([
   loadJSONAny(LOGPROB_PATHS),
   loadJSONAny(BASELINE_PATHS),
+  loadJSONAny(PROFILE_PATHS),
 ]);
+
+/* ============================================================== dataset === */
+const nfmt = (n) => Number(n).toLocaleString('en-US');
+
+if (!ds) {
+  for (const [id, _] of [['ds-tiles'], ['ds-windows'], ['ds-heat'], ['ds-traces']]) {
+    notGenerated(document.getElementById(id), 'scripts/profile_dataset.py',
+                 ['results/phase1/dataset_profile.json']);
+  }
+  document.getElementById('ds-meta').textContent = '';
+} else {
+  document.getElementById('ds-meta').innerHTML =
+    esc(ds.source_dir || '') + ' &middot; ' + ds.sampling_rate_hz + ' Hz';
+
+  /* ---- stat tiles: headline numbers, no chart needed ---- */
+  const tiles = [
+    ['Subjects', nfmt(ds.n_subjects)],
+    ['Hours', Number(ds.total_duration_hours).toFixed(1)],
+    ['Rows', nfmt(ds.total_rows)],
+    ['Windows', nfmt(ds.total_windows)],
+    ['Features / window', nfmt(ds.features_per_window)],
+    ['Rows with NaN', Number(ds.nan_pct).toFixed(2) + '%'],
+  ];
+  document.getElementById('ds-tiles').innerHTML =
+    '<div class="tiles">' + tiles.map(([k, v]) =>
+      `<div class="tile"><div class="n">${esc(v)}</div><div class="k">${esc(k)}</div></div>`
+    ).join('') + '</div>';
+
+  /* ---- windows per class ---- */
+  const wc = Object.entries(ds.window_counts || {});
+  const wcMax = Math.max(...wc.map(([, v]) => v), 1);
+  document.getElementById('ds-windows').innerHTML = `<div class="bars">
+    ${wc.map(([k, v]) => `
+      <div class="bar-row" title="${esc(k)}: ${nfmt(v)} windows">
+        <span class="name">${esc(k)}</span>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:${(v / wcMax * 100).toFixed(2)}%"></div>
+        </div>
+        <span class="val">${nfmt(v)}</span>
+      </div>`).join('')}
+  </div>`;
+
+  /* ---- per-subject x activity heat grid ---- */
+  const subs = Object.keys(ds.per_subject).sort();
+  const actIds = Object.keys(ds.global_activity_counts)
+    .map(Number).filter((a) => a !== 0).sort((a, b) => a - b);
+  const names = ds.activity_names || {};
+  const targets = ds.target_activities || {};
+  let hmax = 1;
+  for (const s of subs) {
+    for (const a of actIds) {
+      hmax = Math.max(hmax, ds.per_subject[s].activity_counts[String(a)] || 0);
+    }
+  }
+  document.getElementById('ds-heat').innerHTML = `<div class="matrix-wrap">
+    <table class="heat">
+      <thead><tr><th></th>${actIds.map((a) =>
+        `<th class="col-head">${esc(names[String(a)] || a)}</th>`).join('')}</tr></thead>
+      <tbody>${subs.map((s) => `<tr>
+        <th class="row-head">subject${esc(s)}</th>
+        ${actIds.map((a) => {
+          const v = ds.per_subject[s].activity_counts[String(a)] || 0;
+          const alpha = v === 0 ? 0 : 0.10 + 0.90 * (v / hmax);
+          const strong = alpha > 0.55;
+          const isTarget = Object.prototype.hasOwnProperty.call(targets, String(a));
+          return `<td class="${isTarget ? '' : 'excluded'}"
+            title="subject${esc(s)} · ${esc(names[String(a)] || a)}: ${nfmt(v)} rows"
+            style="background:rgba(232,163,61,${alpha.toFixed(3)});
+                   color:${strong ? '#231602' : 'var(--text)'}">${v ? nfmt(v) : ''}</td>`;
+        }).join('')}
+      </tr>`).join('')}</tbody>
+    </table>
+  </div>
+  <div class="legend-note"><span>0</span><span class="swatch"></span>
+    <span>${nfmt(hmax)} rows</span></div>`;
+
+  /* ---- raw signal sparklines ---- */
+  document.getElementById('ds-trace-meta').textContent =
+    `${ds.trace_seconds}s excerpt per activity`;
+  const spark = (series, cls) => {
+    const n = series.length;
+    if (!n) return '';
+    const lo = Math.min(...series), hi = Math.max(...series);
+    const rng = (hi - lo) || 1;
+    const pts = series.map((v, i) =>
+      `${(i / (n - 1) * 100).toFixed(2)},${(28 - ((v - lo) / rng) * 26).toFixed(2)}`
+    ).join(' ');
+    return `<polyline class="${cls}" points="${pts}" fill="none"
+      stroke-width="1.4" vector-effect="non-scaling-stroke"
+      stroke-linejoin="round" stroke-linecap="round"/>`;
+  };
+  const traces = ds.traces || {};
+  document.getElementById('ds-traces').innerHTML =
+    '<div class="traces">' + Object.entries(traces).map(([act, t]) => `
+      <div class="trace-card">
+        <h3>${esc(act)}</h3>
+        <div class="who">subject${esc(t.subject)} &middot; m/s&sup2;</div>
+        ${['wrist', 'chest', 'ankle'].map((node) => {
+          const ch = t.channels[node];
+          if (!ch) return '';
+          return `<div class="trace-row">
+            <span class="node">${esc(node)}</span>
+            <svg viewBox="0 0 100 30" preserveAspectRatio="none"
+                 role="img" aria-label="${esc(node)} x y z acceleration">
+              ${spark(ch.x, 'axis-x')}${spark(ch.y, 'axis-y')}${spark(ch.z, 'axis-z')}
+            </svg>
+          </div>`;
+        }).join('')}
+      </div>`).join('') + '</div>' + `
+    <div class="axis-key">
+      <span><i style="background:#3d8bc9"></i>x</span>
+      <span><i style="background:#b0781f"></i>y</span>
+      <span><i style="background:#9160ad"></i>z</span>
+      <span class="muted">each trace is independently scaled to its own range</span>
+    </div>`;
+}
 
 /* ------------------------------------------------------- status cards --- */
 function statusCard(label, data, render) {
