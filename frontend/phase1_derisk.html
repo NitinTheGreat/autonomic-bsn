@@ -125,13 +125,21 @@ const [lp, base, ds] = await Promise.all([
 /* ============================================================== dataset === */
 const nfmt = (n) => Number(n).toLocaleString('en-US');
 
-if (!ds) {
-  for (const [id, _] of [['ds-tiles'], ['ds-windows'], ['ds-heat'], ['ds-traces']]) {
+const DS_PANELS = ['ds-tiles', 'ds-windows', 'ds-heat', 'ds-traces'];
+
+/* A profile that is missing or half-written must not take the whole page down
+   with it -- the logprob and accuracy panels are independent results and have
+   to keep rendering. */
+const dsUsable = ds && ds.per_subject && ds.window_counts && ds.global_activity_counts;
+
+if (!dsUsable) {
+  for (const id of DS_PANELS) {
     notGenerated(document.getElementById(id), 'scripts/profile_dataset.py',
                  ['results/phase1/dataset_profile.json']);
   }
-  document.getElementById('ds-meta').textContent = '';
-} else {
+  document.getElementById('ds-meta').textContent =
+    ds ? 'profile file is incomplete - re-run the profiler' : '';
+} else try {
   document.getElementById('ds-meta').innerHTML =
     esc(ds.source_dir || '') + ' &middot; ' + ds.sampling_rate_hz + ' Hz';
 
@@ -236,6 +244,15 @@ if (!ds) {
       <span><i style="background:#9160ad"></i>z</span>
       <span class="muted">each trace is independently scaled to its own range</span>
     </div>`;
+} catch (err) {
+  console.error('[dataset] render failed:', err);
+  for (const id of DS_PANELS) {
+    document.getElementById(id).innerHTML =
+      `<div class="notice"><strong>Could not render this panel.</strong>
+        The profile file loaded but its contents were unexpected
+        (<code>${esc(err.message)}</code>). Re-run
+        <code>python scripts/profile_dataset.py</code>.</div>`;
+  }
 }
 
 /* ------------------------------------------------------- status cards --- */
