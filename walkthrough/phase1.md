@@ -1,0 +1,263 @@
+# Phase 1 — Foundational de-risking
+
+**Status:** infrastructure complete and verified; **the two headline checks are
+not yet answered** because they need a live model. Read "Current blockers"
+before assuming anything passed.
+
+**Date:** 2026-08-29
+
+---
+
+## 1. Goal
+
+The project studies whether LLM agents doing human activity recognition (HAR)
+from body-worn sensors become **confidently wrong** when the sensor network
+degrades. Two things must be true before any of that is worth building:
+
+| # | Question | Gate |
+|---|---|---|
+| 1 | Can we extract **real token log-probabilities** from the model? | distribution sums to 1.0 (±1e-6) and is **not uniform** |
+| 2 | Is zero-shot HAR **accurate enough on clean data**? | overall accuracy **≥ 0.65** over 8 classes |
+
+Question 1 gates everything: without a genuine confidence signal, "confidently
+wrong" cannot be measured at all. Question 2 gates dynamic range: if the model
+is near chance on pristine sensors, later degradation results are
+unattributable.
+
+**Phase 1 is deliberately disposable.** The PAMAP2 parsing here is throwaway.
+Only the *verified column indices* carry forward. Phase 2 rebuilds the real
+parser behind `DataSource`.
+
+---
+
+## 2. What was built
+
+```
+configs/models.yaml          backend selection + all tunable parameters
+scripts/_llm_client.py       THE shared logprob extraction path (all backends)
+scripts/check_logprobs.py    Step 1 — logprob verification
+scripts/check_baseline_accuracy.py  Step 2 — windowing, features, accuracy
+scripts/profile_dataset.py   dataset profile for the dashboard (no LLM needed)
+frontend/index.html          cumulative shell; one PHASES array drives the nav
+frontend/phase1_derisk.html  Phase 1 dashboard
+frontend/shared/{style.css,app.js}
+walkthrough/                 these handoff documents
+.env.example                 required environment variables
+```
+
+`_llm_client.py` is the important one. Both check scripts call `score_labels()`
+from it, so Step 2's predictions provably use the same extraction path Step 1
+validates. Any future phase that needs confidence must go through it too.
+
+### Backends
+
+Selected by `backend:` in `configs/models.yaml`; `auto` walks `fallback_order`.
+
+| Backend | Endpoint | How logprobs are requested |
+|---|---|---|
+| `gemini` *(default)* | `generateContent` | `responseLogprobs: true`, `logprobs: N` (API caps N at 20) |
+| `llamacpp` | `POST /completion` | `n_probs`, `post_sampling_probs: false` |
+| `vllm` | `POST /v1/completions` | `logprobs: N`, `echo: true` |
+| `ollama_native` | `POST /api/generate` | kept for reference, **removed from the fallback chain** |
+
+---
+
+## 3. Two model traps found — both are silent-failure traps
+
+These matter more than any code in this phase, because each would produce a
+system that *looks* like it works while returning no usable confidence.
+
+### 3.1 Ollama's OpenAI-compat layer
+
+`/v1/chat/completions` on port 11434 **silently drops `logprobs`** even when
+requested — listed as unsupported in Ollama's own OpenAI-compat docs, tracked
+by [ollama/ollama#16117](https://github.com/ollama/ollama/issues/16117). It
+answers `200 OK` with a normal-looking body and no confidence data.
+
+`_llm_client.py` **hard-blocks** any endpoint matching `:11434` + `/v1/`.
+Ollama's *native* `/api/generate` gained logprobs only recently, so the client
+verifies the field is present and fails loudly rather than degrading.
+
+### 3.2 Gemini 3.x does not support logprobs
+
+The request was to use **Gemini 3 Flash**. It cannot be used for this project:
+
+- `responseLogprobs` works on **gemini-2.5-flash / 2.5-pro**.
+- The **Gemini 3.x family** (`gemini-3-flash`, `gemini-3-pro`) either rejects
+  the request with *"Logprobs is not supported for this model"* or returns a
+  candidate with `logprobsResult` absent/null.
+
+Since this project measures model confidence, a model without logprobs is
+unusable here **regardless of how good its text output is**. The config
+therefore defaults to `gemini-2.5-flash`, and the extractor fails loudly naming
+the fix if `logprobsResult` is missing.
+
+> **Open decision for the user.** If Gemini 3 Flash is required for other
+> reasons, Phase 1 Step 1 cannot pass with it and the confidence-based research
+> question needs rethinking. See "Open questions".
+
+Two further Gemini details that are easy to get wrong:
+- `thinkingConfig.thinkingBudget: 0` is set, because 2.5-series models
+  otherwise spend the single allowed output token on internal reasoning and
+  return an empty candidate.
+- `logprobs` is capped at **20**, which comfortably covers the 8 label tokens.
+
+---
+
+## 4. What was verified, and how
+
+**Be precise about this distinction — it is the point of the phase.**
+
+### Verified against REAL data ✅
+
+| Claim | Evidence |
+|---|---|
+| PAMAP2 present and well-formed | 9 Protocol files, 54 columns, 2,872,533 rows, 8.0 hours |
+| Label map is correct | all 8 expected activityIDs present; **no undocumented IDs** |
+| Excluded activities behave as designed | IDs 7/16/17/24 reported as INFO, not false alarms |
+| Windowing produces usable data | **9,909 windows**, all 8 classes represented |
+| Column indices are right | wrist 4/5/6, chest 21/22/23, ankle 38/39/40 — consistent with 17-column IMU blocks at 3/20/37 |
+| Feature maths | energy and std cross-checked against independent numpy to 6 dp |
+
+### Verified against MOCKS / FIXTURES ⚙️ (code correct; says nothing about the science)
+
+| Path | Result |
+|---|---|
+| llama.cpp good response | parses, `max_prob` 0.783984, sums to 1.0 |
+| vLLM `echo`+`top_logprobs` | identical distribution |
+| Gemini good response | identical distribution — shared softmax confirmed |
+| Uniform distribution | **rejected** (the anti-noise guard fires) |
+| Missing logprob field | fails loudly |
+| Gemini 3-style missing `logprobsResult` | fails loudly, names the fix |
+| Ollama `/v1` endpoint | hard-refused |
+| Missing `GEMINI_API_KEY` | actionable message |
+| Corrupted label map (ID removed + undocumented ID injected) | both caught, exit 1 |
+| Frontend render | 13/13 results panels, 13/13 dataset panels, 7/7 empty-state, malformed-profile recovery |
+
+### NOT verified ❌
+
+- **Whether the model returns real logprobs in practice** — needs an API key.
+- **Whether baseline accuracy reaches 0.65** — needs a working backend.
+
+Neither can be inferred from the mock results. `results/phase1/logprob_check.json`
+currently holds a genuine `pass: false` from a run with no backend reachable.
+**No results were fabricated at any point.**
+
+---
+
+## 5. Design decisions that depart from the original brief
+
+Each was a deliberate call; revisit if you disagree.
+
+1. **Label-map warnings are tiered.** The brief said to warn prominently on any
+   unexpected activityID with a large row count. PAMAP2's Protocol files
+   legitimately contain IDs 7/16/17/24 with 40k–240k rows each, so the literal
+   rule fires on every correct dataset and trains you to ignore warnings. Now:
+   missing-expected → **warning**; *undocumented* ID → **warning**;
+   documented-but-excluded → **INFO**. Confirmed correct on real data.
+
+2. **`step2_n_probs` defaults to 20, not 8.** With only 8 candidate slots, mass
+   on `"\n"` or `<eos>` can push a real label token out of the top-k and
+   silently zero it.
+
+3. **Windows never straddle** an activity change or a recording gap. Windows are
+   cut only inside contiguous single-activity segments; otherwise labels and
+   statistics are meaningless.
+
+4. **Results are mirrored into `frontend/results/`.** `python -m http.server`
+   refuses to serve paths above its root (verified), so a page served from
+   `frontend/` cannot reach `../results/`. Both locations are gitignored.
+
+5. **Token normalisation.** Mass from `"A"`, `" A"` and sentencepiece `"▁A"` is
+   summed in log space before renormalising, so a model that emits a leading
+   space is not mistaken for one that never answered.
+
+6. **`.gitignore` uses `data/raw/*` + `!data/raw/README.md`.** Git cannot
+   re-include a file under an excluded directory, so the original pattern would
+   have silently dropped the dataset documentation.
+
+7. **Fast CSV parser.** PAMAP2 is single-space separated, so `sep=" "` uses the
+   C engine (~1.6 s/subject vs ~15 s with the regex engine).
+
+---
+
+## 6. Results so far
+
+```
+Dataset          2,872,533 rows · 8.0 hours · 9 subjects · 9,909 windows
+Label map        PASS — all 8 IDs present, no undocumented IDs
+Logprob check    NOT YET RUN against a live model (current file: pass=false)
+Baseline accuracy NOT YET RUN
+```
+
+Windows per class: lying 1487 · sitting 1424 · standing 1441 · walking 1837 ·
+running 757 · cycling 1277 · ascending_stairs 892 · descending_stairs 794.
+
+**Subject109 has only 8,477 rows across 2 activities and yields 0 windows** —
+it is excluded from both the test and few-shot sets. Test subjects are
+101/105/106; few-shot comes from 102/103/104/107/108 (disjointness is enforced
+at runtime — the script aborts if they overlap).
+
+---
+
+## 7. Current blockers
+
+1. **`GEMINI_API_KEY` is not set.** Copy `.env.example` to `.env` and add a key
+   from <https://aistudio.google.com/apikey>.
+2. Then run, in order:
+   ```bash
+   python scripts/check_logprobs.py            # must PASS before anything else
+   python scripts/check_baseline_accuracy.py   # must reach >= 0.65
+   ```
+
+**If baseline accuracy < 0.65: STOP.** Do not start Phase 2. The script prints
+the 3 most-confused class pairs and ranks the candidate fixes from what the
+confusion matrix actually shows — (a) better few-shot, (b) richer features
+(gyro, cross-axis correlation), (c) drop to the 6-class set, (d) larger model.
+Act on that ranking rather than guessing.
+
+---
+
+## 8. Open questions for the user
+
+1. **Gemini 3 Flash cannot provide logprobs.** Confirm `gemini-2.5-flash` is
+   acceptable, or decide the project uses a local llama.cpp model instead.
+2. **Hosted vs local.** The original brief specified a *local* LLM. Moving to a
+   hosted API changes cost, reproducibility and rate-limiting characteristics,
+   and means ~150 sequential calls per accuracy run. Worth an explicit decision
+   before the degradation sweeps, which will be far larger.
+3. **Phase 2–10 names** in `frontend/index.html` are placeholders.
+
+---
+
+## 9. How to approach Phase 2
+
+**Do not start until both Phase 1 gates pass.**
+
+Phase 2 builds the real `DataSource`-based parser. Carry forward:
+
+- **The verified column map, and only that** (documented in
+  `data/raw/README.md`): timestamp 0, activityID 1, accel16 at 4/5/6 (wrist),
+  21/22/23 (chest), 38/39/40 (ankle). Full 54-column semantics — gyro at block
+  offsets +7..+9, magnetometer +10..+12, orientation +13..+16 (**invalid in
+  this collection, never use**) — belong to Phase 2.
+- **The windowing contract**: 2.56 s, 50 % overlap, contiguous single-activity
+  segments only, ≥60 % sample coverage. Phase 1's window counts are the
+  reference; a rebuilt parser should reproduce ~9,909 windows.
+- **`_llm_client.score_labels()`** unchanged — the backend recorded in
+  `logprob_check.json` must be reused, since confidence numbers are not
+  comparable across serving stacks.
+
+Treat `scripts/check_baseline_accuracy.py` as **reference, not a base class**.
+It is intentionally disposable; do not extend it into the real pipeline.
+
+Still explicitly out of scope until their own phases: failure injection, the
+health monitor, and LangGraph.
+
+### Adding the Phase 2 page
+
+`frontend/index.html` holds a single `PHASES` array. Shipping a phase means
+adding one entry (or flipping `page` from `null` to a filename). Follow the
+existing panel conventions: single-hue sequential ramps for magnitude, status
+colour always paired with a text label, and every panel degrading to a
+"run the script first" notice when its JSON is absent.
