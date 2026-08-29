@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase 1 - De-risking Checks</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body>
+
+<div class="page">
+  <header class="page-head">
+    <div class="eyebrow">Phase 1</div>
+    <h1>Foundational de-risking checks</h1>
+    <p class="muted">
+      Two yes/no questions, answered before any of the wider system is built:
+      can we read real token log-probabilities from a local LLM, and is
+      zero-shot activity recognition accurate enough on clean sensor data to
+      leave headroom for measuring degradation?
+    </p>
+  </header>
+
+  <!-- ------------------------------------------------ status cards ------ -->
+  <section class="grid-2" id="status-cards">
+    <div class="status unknown"><div class="label">Check 1 &middot; Logprob extraction</div>
+      <div class="verdict">Loading&hellip;</div></div>
+    <div class="status unknown"><div class="label">Check 2 &middot; Baseline accuracy</div>
+      <div class="verdict">Loading&hellip;</div></div>
+  </section>
+
+  <!-- ------------------------------------------------ logprob dist ------ -->
+  <section class="card">
+    <div class="card-title">
+      <h2>Parsed probability distribution</h2>
+      <span class="small muted" id="dist-meta"></span>
+    </div>
+    <p class="small muted" style="margin-top:-6px">
+      Softmax-renormalised over the label tokens returned by the backend. A
+      flat bar chart here would mean we are reading noise rather than model
+      confidence &mdash; that is exactly what this check exists to catch.
+    </p>
+    <div id="dist-chart"></div>
+  </section>
+
+  <!-- --------------------------------------------- per-class accuracy --- -->
+  <section class="card">
+    <div class="card-title">
+      <h2>Per-class accuracy</h2>
+      <span class="small muted" id="acc-meta"></span>
+    </div>
+    <div id="acc-chart"></div>
+  </section>
+
+  <!-- ------------------------------------------------ confusion --------- -->
+  <section class="card">
+    <div class="card-title">
+      <h2>Confusion matrix</h2>
+      <span class="small muted">rows = true &middot; columns = predicted</span>
+    </div>
+    <div id="confusion"></div>
+  </section>
+
+  <!-- ------------------------------------------------ prompt ------------ -->
+  <section class="card">
+    <div class="card-title">
+      <h2>Exact prompt template</h2>
+      <span class="small muted">verbatim, for the reproducibility appendix</span>
+    </div>
+    <div id="prompt-block"></div>
+  </section>
+</div>
+
+<script type="module">
+import { loadJSONAny, esc, fmt, notGenerated } from './shared/app.js';
+
+/* Prefer the mirrored copy (works with `cd frontend && python -m http.server`),
+   fall back to the canonical path when served from the project root. */
+const LOGPROB_PATHS  = ['results/phase1/logprob_check.json',
+                        '../results/phase1/logprob_check.json'];
+const BASELINE_PATHS = ['results/phase1/baseline_accuracy.json',
+                        '../results/phase1/baseline_accuracy.json'];
+
+const [lp, base] = await Promise.all([
+  loadJSONAny(LOGPROB_PATHS),
+  loadJSONAny(BASELINE_PATHS),
+]);
+
+/* ------------------------------------------------------- status cards --- */
+function statusCard(label, data, render) {
+  if (!data) {
+    return `<div class="status unknown">
+      <div class="label">${esc(label)}</div>
+      <div class="verdict">Not yet run</div>
+      <div class="sub">Run the Phase 1 script to generate this result.</div>
+    </div>`;
+  }
+  const ok = data.pass === true;
+  return `<div class="status ${ok ? 'pass' : 'fail'}">
+    <div class="label">${esc(label)}</div>
+    <div class="verdict"><span aria-hidden="true">${ok ? '&#10003;' : '&#10007;'}</span>
+      ${ok ? 'PASS' : 'FAIL'}</div>
+    ${render(data)}
+  </div>`;
+}
+
+document.getElementById('status-cards').innerHTML =
+  statusCard('Check 1 · Logprob extraction', lp, (d) => `
+      <div class="detail">Backend <strong>${esc(d.backend ?? 'none')}</strong>
+        &middot; max&nbsp;prob ${fmt(d.max_prob, 4)}</div>
+      <div class="sub">${esc(d.model ?? '')} ${d.endpoint ? '&middot; ' + esc(d.endpoint) : ''}</div>`)
+  + statusCard('Check 2 · Baseline accuracy', base, (d) => `
+      <div class="detail">Overall accuracy
+        <strong>${fmt(d.overall_accuracy, 4)}</strong>
+        &middot; threshold ${fmt(d.pass_threshold ?? 0.65, 2)}</div>
+      <div class="sub">${d.n_windows} windows &middot; subjects
+        ${esc((d.subjects_used || []).join(', '))} &middot; ${esc(d.model ?? '')}</div>`);
+
+/* ------------------------------------------------ logprob bar chart ----- */
+const distEl = document.getElementById('dist-chart');
+if (!lp || !lp.distribution || !Object.keys(lp.distribution).length) {
+  notGenerated(distEl, 'scripts/check_logprobs.py',
+               ['results/phase1/logprob_check.json']);
+} else {
+  const entries = Object.entries(lp.distribution);
+  const max = Math.max(...entries.map(([, v]) => v), 1e-9);
+  const uniform = 1 / entries.length;
+  document.getElementById('dist-meta').innerHTML =
+    `${entries.length} labels &middot; uniform would be ${fmt(uniform, 4)}`;
+
+  distEl.innerHTML = `<div class="bars-plot">
+    <div class="bars">${entries.map(([k, v]) => `
+      <div class="bar-row" title="${esc(k)}: ${fmt(v, 6)}">
+        <span class="name">${esc(k)}</span>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:${(v / max * 100).toFixed(2)}%"></div>
+        </div>
+        <span class="val">${fmt(v, 4)}</span>
+      </div>`).join('')}
+    </div>
+  </div>
+  <div class="legend-note">Bars scaled to the largest probability
+    (${fmt(max, 4)}).</div>`;
+}
+
+/* -------------------------------------------- per-class accuracy bars --- */
+const accEl = document.getElementById('acc-chart');
+if (!base || !base.per_class_accuracy) {
+  notGenerated(accEl, 'scripts/check_baseline_accuracy.py',
+               ['results/phase1/baseline_accuracy.json']);
+} else {
+  const thr = base.pass_threshold ?? 0.65;
+  const rows = Object.entries(base.per_class_accuracy);
+  document.getElementById('acc-meta').innerHTML =
+    `overall ${fmt(base.overall_accuracy, 3)} &middot; ${base.n_windows} windows`;
+
+  /* The dashed rule sits inside the track column of the grid: 132px name
+     column + 12px gap, then thr% of the remaining track width. */
+  accEl.innerHTML = `
+    <div class="bars-plot" style="padding-top:20px">
+      <div class="threshold" data-label="threshold ${(thr * 100).toFixed(0)}%"
+           style="left:calc(132px + 12px + (100% - 132px - 62px - 24px) * ${thr})"></div>
+      <div class="bars">${rows.map(([name, v]) => {
+        const val = (v === null || v === undefined) ? null : Number(v);
+        const cls = val === null ? '' : (val >= thr ? 'is-pass' : 'is-fail');
+        return `<div class="bar-row" title="${esc(name)}: ${val === null ? 'n/a' : fmt(val, 3)}">
+          <span class="name">${esc(name)}</span>
+          <div class="bar-track">
+            <div class="bar-fill ${cls}" style="width:${val === null ? 0 : (val * 100).toFixed(2)}%"></div>
+          </div>
+          <span class="val">${val === null ? 'n/a' : fmt(val, 3)}</span>
+        </div>`;
+      }).join('')}
+      </div>
+    </div>
+    <div class="legend-note">
+      <span style="color:var(--pass)">&#9632;</span> at or above threshold
+      <span style="color:var(--fail);margin-left:10px">&#9632;</span> below threshold
+    </div>`;
+}
+
+/* ------------------------------------------------- confusion matrix ----- */
+const confEl = document.getElementById('confusion');
+if (!base || !base.confusion_matrix) {
+  notGenerated(confEl, 'scripts/check_baseline_accuracy.py',
+               ['results/phase1/baseline_accuracy.json']);
+} else {
+  const m = base.confusion_matrix;
+  const labels = base.confusion_matrix_labels
+    || Object.keys(base.per_class_accuracy || {});
+  const max = Math.max(...m.flat(), 1);
+
+  /* Sequential single-hue ramp: opacity of the accent encodes magnitude,
+     light -> dark. One hue only -- never a rainbow scale. */
+  const cell = (v, i, j) => {
+    const a = v === 0 ? 0 : 0.10 + 0.90 * (v / max);
+    const strong = a > 0.55;
+    return `<td class="${i === j ? 'diag' : ''} ${v === 0 ? 'zero' : ''}"
+      title="true ${esc(labels[i])} → predicted ${esc(labels[j])}: ${v}"
+      style="background:rgba(232,163,61,${a.toFixed(3)});
+             color:${strong ? '#231602' : 'var(--text)'}">${v}</td>`;
+  };
+
+  confEl.innerHTML = `<div class="matrix-wrap">
+    <table class="matrix">
+      <thead><tr><th></th>${labels.map((l) =>
+        `<th class="col-head">${esc(l)}</th>`).join('')}</tr></thead>
+      <tbody>${m.map((row, i) => `<tr>
+        <th class="row-head">${esc(labels[i])}</th>
+        ${row.map((v, j) => cell(v, i, j)).join('')}
+      </tr>`).join('')}</tbody>
+    </table>
+  </div>
+  <div class="legend-note">
+    <span>0</span><span class="swatch"></span><span>${max}</span>
+    <span style="margin-left:10px">outlined cells are the diagonal (correct)</span>
+  </div>`;
+}
+
+/* ------------------------------------------------------ prompt block ---- */
+const promptEl = document.getElementById('prompt-block');
+const promptText = base?.example_rendered_prompt || base?.prompt_template;
+if (!promptText) {
+  notGenerated(promptEl, 'scripts/check_baseline_accuracy.py',
+               ['results/phase1/baseline_accuracy.json']);
+} else {
+  promptEl.innerHTML = `<pre class="prompt">${esc(promptText)}</pre>`;
+}
+</script>
+
+</body>
+</html>

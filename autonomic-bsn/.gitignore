@@ -1,0 +1,29 @@
+# --- datasets: never commit PAMAP2 (~1.6 GB) ---
+# Ignore the CONTENTS, not the directory itself: git cannot re-include a file
+# whose parent directory is excluded, and data/raw/README.md must stay tracked
+# because it documents the download commands.
+data/raw/*
+!data/raw/README.md
+
+# --- generated results (regenerate with the phase scripts) ---
+results/
+frontend/results/
+
+# --- model weights ---
+*.gguf
+*.bin
+*.safetensors
+
+# --- python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

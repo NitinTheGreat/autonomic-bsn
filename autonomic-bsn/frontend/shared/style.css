@@ -1,0 +1,318 @@
+/* Autonomic Agentic BSN -- shared dark theme.
+   No frameworks, no build step. Palette is fixed project-wide. */
+
+:root {
+  --bg:      #0f1428;
+  --panel:   #161d3a;
+  --accent:  #e8a33d;
+  --text:    #e8ecf7;
+  --muted:   #8b95b0;
+
+  --border:  rgba(232, 236, 247, 0.10);
+  --border-strong: rgba(232, 236, 247, 0.18);
+
+  /* Status: reserved for pass/fail state only, never for data series.
+     Always paired with a text label -- never colour alone. */
+  --pass:    #3ecf8e;
+  --fail:    #f2555a;
+  --pass-bg: rgba(62, 207, 142, 0.12);
+  --fail-bg: rgba(242, 85, 90, 0.12);
+
+  --radius:  12px;
+  --radius-sm: 8px;
+  --gap:     18px;
+
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue",
+          Arial, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", Consolas, "SF Mono", Menlo,
+          monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { margin: 0 0 .35em; font-weight: 600; letter-spacing: -0.01em; }
+h1 { font-size: 1.6rem; }
+h2 { font-size: 1.15rem; }
+h3 { font-size: .95rem; }
+
+p { margin: 0 0 1em; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.muted { color: var(--muted); }
+.small { font-size: .82rem; }
+.mono  { font-family: var(--mono); }
+
+/* ---------------------------------------------------------------- layout -- */
+.page { padding: 26px 30px 60px; max-width: 1180px; }
+
+.page-head { margin-bottom: 22px; }
+.page-head .eyebrow {
+  color: var(--accent);
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--gap);
+}
+
+/* ----------------------------------------------------------------- cards -- */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: var(--gap);
+}
+.card-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.card-title h2 { margin: 0; }
+
+/* Large PASS / FAIL status card. Colour is reinforced by the word and the
+   glyph, so the state is never conveyed by hue alone. */
+.status {
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  padding: 20px 22px;
+  background: var(--panel);
+}
+.status.pass { border-color: var(--pass); background: var(--pass-bg); }
+.status.fail { border-color: var(--fail); background: var(--fail-bg); }
+.status.unknown { border-style: dashed; }
+
+.status .label {
+  font-size: .74rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.status .verdict {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 2.1rem;
+  font-weight: 700;
+  line-height: 1.1;
+  margin: 6px 0 4px;
+}
+.status.pass .verdict { color: var(--pass); }
+.status.fail .verdict { color: var(--fail); }
+.status.unknown .verdict { color: var(--muted); font-size: 1.35rem; }
+.status .detail { color: var(--text); font-size: .9rem; }
+.status .sub { color: var(--muted); font-size: .82rem; }
+
+/* ------------------------------------------------------------ bar charts -- */
+/* Thin marks, rounded data-end, anchored to a baseline at x=0. */
+.bars { display: flex; flex-direction: column; gap: 9px; margin-top: 6px; }
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 132px 1fr 62px;
+  align-items: center;
+  gap: 12px;
+}
+.bar-row .name {
+  font-size: .84rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar-track {
+  position: relative;
+  height: 15px;
+  background: rgba(232, 236, 247, 0.06);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 0 4px 4px 0;   /* rounded data-end only */
+  min-width: 2px;
+  transition: width .25s ease;
+}
+.bar-fill.is-pass { background: var(--pass); }
+.bar-fill.is-fail { background: var(--fail); }
+.bar-row .val {
+  font-family: var(--mono);
+  font-size: .8rem;
+  color: var(--text);
+  text-align: right;
+}
+
+/* Threshold rule drawn across the plotting area. */
+.bars-plot { position: relative; }
+.threshold {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--accent);
+  pointer-events: none;
+  z-index: 2;
+}
+.threshold::after {
+  content: attr(data-label);
+  position: absolute;
+  top: -18px;
+  left: 6px;
+  font-size: .7rem;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* -------------------------------------------------------- confusion grid -- */
+/* Sequential single-hue ramp (the accent), light -> dark by magnitude.
+   Never a rainbow: intensity alone carries the value. */
+.matrix-wrap { overflow-x: auto; }
+table.matrix { border-collapse: separate; border-spacing: 2px; font-size: .78rem; }
+table.matrix th {
+  font-weight: 500;
+  color: var(--muted);
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+table.matrix th.row-head { text-align: right; }
+table.matrix th.col-head {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  height: 88px;
+  vertical-align: bottom;
+}
+table.matrix td {
+  width: 40px;
+  height: 34px;
+  text-align: center;
+  border-radius: 5px;
+  font-family: var(--mono);
+  color: var(--text);
+  background: rgba(232, 236, 247, 0.04);
+}
+table.matrix td.diag { outline: 1px solid var(--border-strong); }
+table.matrix td.zero { color: var(--muted); opacity: .45; }
+
+/* ------------------------------------------------------------ pre / code -- */
+pre.prompt {
+  background: #0c1020;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: .78rem;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre;
+  max-height: 460px;
+}
+
+/* --------------------------------------------------------------- notices -- */
+.notice {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  color: var(--muted);
+  background: rgba(232, 236, 247, 0.02);
+}
+.notice code {
+  font-family: var(--mono);
+  color: var(--accent);
+  font-size: .85em;
+}
+
+.legend-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .78rem;
+  color: var(--muted);
+  margin-top: 10px;
+}
+.swatch {
+  display: inline-block;
+  width: 42px;
+  height: 10px;
+  border-radius: 3px;
+  background: linear-gradient(90deg,
+              rgba(232,163,61,.10), rgba(232,163,61,1));
+}
+
+/* =========================================================== app shell === */
+.shell { display: flex; height: 100vh; overflow: hidden; }
+
+.sidebar {
+  width: 250px;
+  flex: 0 0 250px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 20px 0;
+  overflow-y: auto;
+}
+.sidebar .brand { padding: 0 20px 16px; border-bottom: 1px solid var(--border); }
+.sidebar .brand .title { font-weight: 700; font-size: 1rem; }
+.sidebar .brand .sub { color: var(--muted); font-size: .75rem; }
+
+.nav { list-style: none; margin: 12px 0 0; padding: 0; }
+.nav li { margin: 0; }
+
+.nav a, .nav span.disabled {
+  display: block;
+  padding: 9px 20px;
+  font-size: .86rem;
+  border-left: 3px solid transparent;
+  color: var(--text);
+  text-decoration: none;
+}
+.nav a:hover { background: rgba(232, 236, 247, 0.05); text-decoration: none; }
+.nav a.active {
+  border-left-color: var(--accent);
+  background: rgba(232, 163, 61, 0.10);
+  color: var(--accent);
+}
+.nav .phase-no {
+  display: block;
+  font-size: .68rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.nav a.active .phase-no { color: var(--accent); }
+
+.nav span.disabled { color: var(--muted); opacity: .55; cursor: not-allowed; }
+.nav .tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: .62rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  color: var(--muted);
+  vertical-align: middle;
+}
+
+.viewer { flex: 1; min-width: 0; background: var(--bg); }
+.viewer iframe { width: 100%; height: 100%; border: 0; display: block; }

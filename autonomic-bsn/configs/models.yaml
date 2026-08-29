@@ -1,0 +1,80 @@
+# Phase 1 backend selection.
+#
+# The ONLY thing this phase needs from a backend is a real next-token
+# log-probability distribution. Whichever backend passes check_logprobs.py is
+# recorded in results/phase1/logprob_check.json and every later phase must use
+# that same one.
+#
+# backend: llamacpp | vllm | ollama_native | auto
+#   auto -> try each entry of `fallback_order` until one returns real logprobs.
+backend: llamacpp
+
+fallback_order: [llamacpp, vllm, ollama_native]
+
+backends:
+  # ---------------------------------------------------------------- PRIMARY --
+  # llama.cpp server. CPU-only friendly, no GPU required.
+  #   llama-server -m <path-to-gguf> -c 4096 --port 8080
+  # Native /completion endpoint returns `completion_probabilities`, which is a
+  # genuine pre-sampling logprob distribution when post_sampling_probs=false.
+  llamacpp:
+    endpoint: "http://localhost:8080/completion"
+    model: "local-gguf"          # cosmetic label; llama.cpp serves one model
+    style: llamacpp
+
+  # ------------------------------------------------------------- FALLBACK 1 --
+  # vLLM. Its OpenAI-compatible /v1/completions DOES genuinely support logprobs
+  # (unlike Ollama's /v1 compat layer -- see the note on ollama_native below).
+  #   vllm serve <model> --port 8000
+  vllm:
+    endpoint: "http://localhost:8000/v1/completions"
+    model: "meta-llama/Meta-Llama-3.1-8B-Instruct"   # must match `vllm serve`
+    style: vllm
+    echo: true                   # spec'd; harmless -- we read top_logprobs[-1]
+
+  # ------------------------------------------------------------- FALLBACK 2 --
+  # Ollama NATIVE /api/generate ONLY.
+  #
+  # NEVER point this at http://localhost:11434/v1/chat/completions. Ollama's
+  # OpenAI-compatibility layer silently drops `logprobs` even when requested --
+  # it is listed as unsupported in Ollama's own OpenAI-compat docs, and
+  # ollama/ollama#16117 is the open request for it. It would return a 200 with a
+  # plausible-looking body and no usable confidence data at all.
+  #
+  # The native endpoint only grew logprobs support in recent versions, so
+  # _llm_client.py hard-verifies the field is present and fails loudly if not.
+  ollama_native:
+    endpoint: "http://localhost:11434/api/generate"
+    model: "llama3.1:8b"
+    style: ollama_native
+
+request:
+  timeout_s: 120
+  temperature: 0.0
+  # Step 1 uses 6 labels (A-F); the spec fixes n_probs at 6 there.
+  step1_n_probs: 6
+  # Step 2 uses 8 labels (A-H). We ask for more than 8 candidates on purpose:
+  # with only 8 slots, probability mass parked on "\n", " " or "<eos>" can push
+  # a real label token out of the top-k and silently zero it. 20 is cheap.
+  step2_n_probs: 20
+  # "Not uniform" test for step 1: max_prob must beat 1/6 by at least this much.
+  uniform_margin: 0.05
+
+data:
+  # Resolved relative to the repo root, with fallbacks tried in order.
+  pamap2_protocol_dirs:
+    - "data/raw/pamap2/Protocol"
+    - "../data/raw/pamap2/Protocol"
+
+baseline:
+  n_windows: 150
+  window_seconds: 2.56
+  overlap: 0.5
+  sampling_rate_hz: 100
+  min_window_coverage: 0.6     # keep a window only if >=60% of expected samples
+  max_sample_gap_s: 0.1        # larger gap -> segment break (no straddling)
+  few_shot_per_class: 2
+  test_subjects: [101, 105, 106]      # >=3 subjects, per spec
+  fewshot_subjects: [102, 103, 104, 107, 108]   # strictly disjoint from above
+  pass_threshold: 0.65
+  seed: 20260829

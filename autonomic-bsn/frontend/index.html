@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autonomic Agentic BSN</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body>
+
+<div class="shell">
+  <nav class="sidebar">
+    <div class="brand">
+      <div class="title">Autonomic Agentic BSN</div>
+      <div class="sub">Confidence under sensor degradation</div>
+    </div>
+    <ul class="nav" id="nav"></ul>
+  </nav>
+
+  <main class="viewer">
+    <iframe id="viewer" title="Selected phase" src="phase1_derisk.html"></iframe>
+  </main>
+</div>
+
+<script type="module">
+/* ---------------------------------------------------------------------------
+   THE ONLY THING TO EDIT WHEN A PHASE SHIPS.
+   Adding a phase = adding one entry here (or flipping `page` on an existing
+   one from null to its filename). Nothing else in this file changes.
+   --------------------------------------------------------------------------- */
+const PHASES = [
+  { n: 1,  name: 'De-risking checks',      page: 'phase1_derisk.html' },
+  { n: 2,  name: 'DataSource + parser',    page: null },
+  { n: 3,  name: 'Failure injection',      page: null },
+  { n: 4,  name: 'Health monitor',         page: null },
+  { n: 5,  name: 'Agent core (LangGraph)', page: null },
+  { n: 6,  name: 'Confidence calibration', page: null },
+  { n: 7,  name: 'Degradation sweep',      page: null },
+  { n: 8,  name: 'Autonomic adaptation',   page: null },
+  { n: 9,  name: 'Evaluation suite',       page: null },
+  { n: 10, name: 'Reproducibility pack',   page: null },
+];
+
+const nav = document.getElementById('nav');
+const viewer = document.getElementById('viewer');
+
+nav.innerHTML = PHASES.map((p) => {
+  const label = `<span class="phase-no">Phase ${p.n}</span>${p.name}`;
+  return p.page
+    ? `<li><a href="#phase${p.n}" data-page="${p.page}" data-n="${p.n}">${label}</a></li>`
+    : `<li><span class="disabled">${label}<span class="tag">not yet built</span></span></li>`;
+}).join('');
+
+function select(n) {
+  const phase = PHASES.find((p) => p.n === n && p.page);
+  if (!phase) return;
+  viewer.src = phase.page;
+  nav.querySelectorAll('a').forEach((a) => {
+    a.classList.toggle('active', Number(a.dataset.n) === n);
+  });
+  document.title = `Phase ${phase.n} - ${phase.name} | Autonomic Agentic BSN`;
+}
+
+nav.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-page]');
+  if (!a) return;
+  e.preventDefault();
+  location.hash = `phase${a.dataset.n}`;
+  select(Number(a.dataset.n));
+});
+
+function fromHash() {
+  const m = /^#phase(\d+)$/.exec(location.hash);
+  const n = m ? Number(m[1]) : 1;
+  select(PHASES.some((p) => p.n === n && p.page) ? n : 1);
+}
+window.addEventListener('hashchange', fromHash);
+fromHash();
+</script>
+
+</body>
+</html>
