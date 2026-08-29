@@ -118,6 +118,86 @@ not a defect in the implementation.
 
 ---
 
+## 4a. PROBE: does a temporal baseline rescue displacement?
+
+Section 4 proposed a temporal baseline as the fix. It was tested as a bounded
+probe (`scripts/probe_temporal_baseline.py` ->
+`results/phase4/temporal_baseline_probe.json`). **Default monitor behaviour is
+unchanged and no headline number above is affected.**
+
+Method: a causal rolling reference gravity vector from the node's own preceding
+N windows (N = 5, 10, 20), with the threshold structure the monitor already
+uses plus a temporal-spread term calibrated on clean held-out data. Because
+rotation is linear, `mean(R.a) == R.mean(a)`, so the injected window's mean
+gravity is exactly `R` applied to the clean one -- verified against the real
+injector to 0.00e+00 degrees, which let the whole sweep run off one pass.
+
+### It works, but only at the onset
+
+| dataset | N | K=1 | K=2 | K=5 | pooled | clean FPR |
+|---|---|---|---|---|---|---|
+| pamap2 | **5** | **0.750** | 0.750 | 0.575 | 0.133 | 0.1291 |
+| pamap2 | 10 | 0.625 | 0.625 | 0.550 | 0.147 | 0.1410 |
+| pamap2 | 20 | 0.375 | 0.375 | 0.375 | 0.199 | 0.1974 |
+| mhealth | **5** | **0.917** | 0.833 | 0.608 | 0.145 | 0.0369 |
+| mhealth | 10 | 0.500 | 0.396 | 0.308 | 0.081 | 0.0451 |
+| mhealth | 20 | 0.250 | 0.229 | 0.175 | 0.042 | 0.0430 |
+
+*(Phase 4 population baseline for comparison: recall 0.458, FPR 0.0667.)*
+
+Onset recall at N=5 reaches **0.75 / 0.92**, well above the population
+baseline's 0.458. But **pooled recall collapses to 0.13-0.15**, far below it.
+The rolling reference absorbs the displacement: mean delta falls from 27.3 deg
+to 6.2 deg on PAMAP2 (**77 % absorbed**) and 41.9 deg to 1.7 deg on MHEALTH
+(**96 % absorbed**).
+
+Shorter buffers are strictly better on both axes -- a longer buffer spans more
+posture variation, widening the calibrated spread and raising the threshold.
+
+Recall is monotone in severity (K=1, averaged over N):
+
+| dataset | sev1 | sev2 | sev3 | sev4 |
+|---|---|---|---|---|
+| pamap2 | 0.33 | 0.50 | 0.67 | 0.83 |
+| mhealth | 0.22 | 0.33 | 0.67 | **1.00** |
+
+### The false-positive cost, and where it comes from
+
+| dataset | N | mixed stream | within-activity | cause |
+|---|---|---|---|---|
+| pamap2 | 5 | 0.1291 | 0.1299 | **genuine posture variation** |
+| pamap2 | 20 | 0.1974 | 0.1785 | genuine posture variation |
+| mhealth | 5 | 0.0369 | **0.0000** | activity transitions only |
+
+On PAMAP2 the temporal baseline **roughly doubles** the false-positive rate
+(0.129 vs 0.0667), and splitting the stream shows this is *not* caused by
+activity transitions -- within-activity FPR is just as high. It is real
+within-activity posture variation.
+
+On MHEALTH the same method looks excellent (FPR 0.037, within-activity 0.000).
+**That gap is itself a finding:** MHEALTH is a scripted protocol with near-zero
+within-activity gravity variation, so it flatters this method. Evaluating a
+temporal baseline only on scripted data would substantially overstate it.
+
+### Verdict — this strengthens section 4's claim
+
+The temporal baseline does not remove the limit; it **relocates** it. It
+converts displacement from a sustained-state detection problem into a
+transient-only one:
+
+- detectable for roughly **1-2 windows (~2.5-5 s) after onset**, then blind;
+- at moderate-to-severe rotation only (sev1 recall 0.22-0.33);
+- at **double the false-positive rate** on naturalistic data.
+
+So the population-reference weakness in section 4 is *not* merely a poor choice
+of reference. Gravity direction carries too little persistent information about
+sensor orientation relative to natural posture variation, whichever reference
+is used. Detecting sustained displacement needs a second modality or an
+explicit orientation estimate, not a better baseline -- a stronger and more
+useful claim than section 4 alone supports.
+
+---
+
 ## 5. Bugs found during evaluation
 
 Each made the monitor look better or worse than it was.
