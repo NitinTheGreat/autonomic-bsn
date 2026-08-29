@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase 3 - Failure Injection</title>
+<link rel="stylesheet" href="shared/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+    gap: 14px;
+    align-items: end;
+  }
+  .field label {
+    display: block;
+    font-size: .7rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 5px;
+  }
+  .field select {
+    width: 100%;
+    padding: 9px 11px;
+    background: #0c1020;
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-family: var(--font);
+    font-size: .88rem;
+  }
+  .field select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .field input[type=range] { width: 100%; accent-color: var(--accent); }
+  .sev-val { font-family: var(--mono); color: var(--accent); font-size: .82rem; }
+
+  .truth {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .truth .box {
+    background: rgba(232, 236, 247, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 11px 13px;
+  }
+  .truth .k {
+    font-size: .66rem;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .truth .v {
+    font-family: var(--mono);
+    font-size: .95rem;
+    color: var(--text);
+    margin-top: 3px;
+    word-break: break-word;
+  }
+  .truth .v.accent { color: var(--accent); }
+
+  .node-card { margin-bottom: var(--gap); }
+  .node-card.injected { border-color: var(--fail); }
+  .node-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .node-head h3 { margin: 0; font-size: .95rem; text-transform: capitalize; }
+  .badge {
+    font-size: .62rem;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 20px;
+    border: 1px solid var(--fail);
+    color: var(--fail);
+  }
+  .badge.clean { border-color: var(--border-strong); color: var(--muted); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .pair { grid-template-columns: 1fr; } }
+  .pane .cap {
+    font-size: .68rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .pane.after .cap { color: var(--fail); }
+  .chart-box { position: relative; height: 165px; }
+
+  table.ge { border-collapse: collapse; width: 100%; font-size: .8rem; }
+  table.ge th, table.ge td {
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--border);
+    text-align: right;
+  }
+  table.ge th:first-child, table.ge td:first-child { text-align: left; }
+  table.ge th { color: var(--muted); font-weight: 500; }
+  table.ge td { font-family: var(--mono); font-size: .78rem; }
+  .ok { color: var(--pass); }
+  .bad { color: var(--fail); }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header class="page-head">
+    <div class="eyebrow">Phase 3</div>
+    <h1>Failure injection lab</h1>
+    <p class="muted">
+      Five failure modes, each a <code class="mono">DataSource</code> decorator
+      that wraps any source and is itself a valid source &mdash; so they compose
+      with the dataset replay today and with Phase 9's hardware unchanged.
+      Only the target node is touched; every other node passes through
+      bit-identical, which is the control condition all later comparisons rest
+      on.
+    </p>
+    <p class="muted small">
+      Missing samples render as <strong>gaps</strong>, never as zero. Zero is a
+      real stationary reading a model may believe; a gap says &ldquo;no
+      measurement&rdquo;. That distinction is what this phase exists to
+      preserve.
+    </p>
+  </header>
+
+  <section class="card">
+    <div class="card-title">
+      <h2>Injection</h2>
+      <span class="small muted" id="sample-meta"></span>
+    </div>
+    <div id="controls-wrap"></div>
+    <div id="truth"></div>
+  </section>
+
+  <div id="charts"></div>
+
+  <section class="card">
+    <div class="card-title">
+      <h2>Gilbert&ndash;Elliott calibration</h2>
+      <span class="small muted">target vs realised, per severity</span>
+    </div>
+    <div id="ge"></div>
+  </section>
+</div>
+
+<script type="module">
+import { loadJSONAny, esc, fmt, notGenerated } from './shared/app.js';
+
+const SAMPLES = 'data/phase3_samples/';
+const VERIF_PATHS = ['results/phase3/injector_verification.json',
+                     '../results/phase3/injector_verification.json'];
+
+const AXIS_COLORS = { x: '#3d8bc9', y: '#b0781f', z: '#9160ad' };
+const NODE_ORDER = ['wrist', 'chest', 'ankle'];
+
+const [manifest, verif] = await Promise.all([
+  loadJSONAny([SAMPLES + 'manifest.json']),
+  loadJSONAny(VERIF_PATHS),
+]);
+
+const charts = [];
+const controlsWrap = document.getElementById('controls-wrap');
+const chartsEl = document.getElementById('charts');
+const truthEl = document.getElementById('truth');
+
+/* =========================================================== explorer === */
+if (!manifest || !manifest.datasets) {
+  notGenerated(controlsWrap, 'scripts/export_phase3_samples.py',
+               ['frontend/data/phase3_samples/manifest.json']);
+  notGenerated(chartsEl, 'scripts/export_phase3_samples.py',
+               ['frontend/data/phase3_samples/manifest.json']);
+} else {
+  controlsWrap.innerHTML = `
+    <div class="controls">
+      <div class="field"><label for="ds">Dataset</label>
+        <select id="ds"></select></div>
+      <div class="field"><label for="act">Activity</label>
+        <select id="act"></select></div>
+      <div class="field"><label for="node">Target node</label>
+        <select id="node"></select></div>
+      <div class="field"><label for="ft">Failure type</label>
+        <select id="ft"></select></div>
+      <div class="field"><label for="sev">Severity
+        <span class="sev-val" id="sevv">1</span></label>
+        <input type="range" id="sev" min="1" max="4" step="1" value="1"></div>
+    </div>`;
+
+  const dsSel = document.getElementById('ds');
+  const actSel = document.getElementById('act');
+  const nodeSel = document.getElementById('node');
+  const ftSel = document.getElementById('ft');
+  const sevIn = document.getElementById('sev');
+  const sevOut = document.getElementById('sevv');
+
+  const opts = (el, vals) => {
+    el.innerHTML = vals.map((v) =>
+      `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  };
+
+  // Dropdowns come from the manifest -- real exported availability only.
+  opts(dsSel, Object.keys(manifest.datasets));
+
+  function actsFor() { return manifest.datasets[dsSel.value].activities; }
+  function fillActs() {
+    opts(actSel, Object.keys(actsFor()));
+    fillNode(); fillFt();
+  }
+  function fillNode() {
+    // Only the node actually targeted in the export is offered.
+    opts(nodeSel, [actsFor()[actSel.value].target_node]);
+  }
+  function fillFt() {
+    opts(ftSel, Object.keys(actsFor()[actSel.value].failures));
+  }
+  function currentFile() {
+    const f = actsFor()[actSel.value].failures[ftSel.value];
+    if (!f) return null;
+    const hit = f.severities.find((s) => String(s.severity) === sevIn.value);
+    return hit ? hit.file : null;
+  }
+
+  async function render() {
+    sevOut.textContent = sevIn.value;
+    const file = currentFile();
+    if (!file) return;
+    const d = await loadJSONAny([SAMPLES + file]);
+    if (!d) { notGenerated(chartsEl, 'scripts/export_phase3_samples.py',
+                           [SAMPLES + file]); return; }
+
+    const gt = d.ground_truth;
+    const req = gt.requested || {};
+    const real = gt.realised || {};
+
+    document.getElementById('sample-meta').innerHTML =
+      `${esc(d.dataset)} &middot; ${esc(d.subject)} &middot; ${esc(d.activity)}`;
+
+    // Human-readable ground truth, plus requested vs REALISED side by side.
+    const reqKey = Object.keys(req).find((k) => k !== 'unit' && k !== 'model');
+    const realKeys = { dropout: 'frac_nan', packet_loss: 'loss_rate',
+                       clock_desync: 'delta_ms', rate_degradation: 'realised_hz',
+                       displacement: 'realised_angle_deg' };
+    const rk = realKeys[d.failure_type];
+    const onset = real.onset_rel_sec;
+
+    truthEl.innerHTML = `
+      <div class="truth">
+        <div class="box"><div class="k">Ground truth</div>
+          <div class="v accent">${esc(gt.tag)}</div></div>
+        <div class="box"><div class="k">Applied to</div>
+          <div class="v">${esc(d.target_node)}${
+            onset !== undefined && onset !== null
+              ? ` from t=${fmt(onset, 2)}s` : ''}</div></div>
+        <div class="box"><div class="k">Requested</div>
+          <div class="v">${esc(reqKey || '-')}: ${
+            esc(String(req[reqKey] ?? '-'))}</div></div>
+        <div class="box"><div class="k">Realised</div>
+          <div class="v accent">${esc(rk || '-')}: ${
+            rk && real[rk] !== undefined ? fmt(real[rk], 4) : '-'}</div></div>
+        ${real.clock_source ? `<div class="box"><div class="k">Clock source</div>
+          <div class="v ${real.clock_source === 'derived' ? 'accent' : ''}">${
+            esc(real.clock_source)}</div></div>` : ''}
+        ${real.gyro_rotated === false ? `<div class="box">
+          <div class="k">Gyro rotated</div>
+          <div class="v">false &mdash; node has no gyroscope</div></div>` : ''}
+      </div>`;
+
+    charts.forEach((c) => c.destroy());
+    charts.length = 0;
+
+    const nodes = NODE_ORDER.filter((n) => d.clean[n]);
+    chartsEl.innerHTML = nodes.map((n) => {
+      const hit = n === d.target_node;
+      return `
+        <section class="card node-card${hit ? ' injected' : ''}">
+          <div class="node-head">
+            <h3>${esc(n)}</h3>
+            <span class="badge${hit ? '' : ' clean'}">${
+              hit ? 'injected &mdash; ' + esc(d.failure_type) : 'untouched'}</span>
+          </div>
+          <div class="pair">
+            <div class="pane"><div class="cap">before</div>
+              <div class="chart-box"><canvas id="b-${esc(n)}"></canvas></div></div>
+            <div class="pane after"><div class="cap">after</div>
+              <div class="chart-box"><canvas id="a-${esc(n)}"></canvas></div></div>
+          </div>
+        </section>`;
+    }).join('');
+
+    const mk = (canvasId, nd, tRef) => {
+      const sets = ['x', 'y', 'z'].map((ax) => ({
+        label: 'accel ' + ax,
+        data: nd.accel_g[ax],
+        borderColor: AXIS_COLORS[ax],
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.15,
+        // NaN arrives as null and MUST render as a gap. Chart.js would bridge
+        // it by default; a dropout drawn as a continuous line would hide the
+        // very thing this page exists to show.
+        spanGaps: false,
+      }));
+      charts.push(new Chart(document.getElementById(canvasId), {
+        type: 'line',
+        data: { labels: tRef, datasets: sets },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          interaction: { mode: 'index', intersect: false },
+          scales: {
+            x: { ticks: { color: '#8b95b0', maxTicksLimit: 6,
+                          callback: (v, i) => (tRef[i] - tRef[0]).toFixed(1) },
+                 grid: { color: 'rgba(232,236,247,0.06)' } },
+            y: { ticks: { color: '#8b95b0' },
+                 grid: { color: 'rgba(232,236,247,0.06)' },
+                 title: { display: true, text: 'accel (g)', color: '#8b95b0' } },
+          },
+          plugins: {
+            legend: { labels: { color: '#e8ecf7', boxWidth: 12,
+                                font: { size: 10 } } },
+            tooltip: { backgroundColor: '#0c1020' },
+          },
+        },
+      }));
+    };
+
+    for (const n of nodes) {
+      mk('b-' + n, d.clean[n], d.clean[n].t);
+      mk('a-' + n, d.injected[n], d.clean[n].t);
+    }
+  }
+
+  dsSel.addEventListener('change', () => { fillActs(); render(); });
+  actSel.addEventListener('change', () => { fillNode(); fillFt(); render(); });
+  ftSel.addEventListener('change', render);
+  nodeSel.addEventListener('change', render);
+  sevIn.addEventListener('input', render);
+
+  fillActs();
+  await render();
+}
+
+/* ================================================ Gilbert-Elliott table === */
+const geEl = document.getElementById('ge');
+if (!verif || !verif.gilbert_elliott) {
+  notGenerated(geEl, 'scripts/verify_injectors.py',
+               ['results/phase3/injector_verification.json']);
+} else {
+  const ge = verif.gilbert_elliott;
+  geEl.innerHTML = `
+    <div class="matrix-wrap">
+      <table class="ge">
+        <thead><tr>
+          <th>Severity</th><th>target L</th><th>realised L</th><th>&Delta;L</th>
+          <th>target B</th><th>realised B</th><th>&Delta;B</th><th>verdict</th>
+        </tr></thead>
+        <tbody>${ge.per_severity.map((r) => `
+          <tr>
+            <td>${r.severity}</td>
+            <td>${fmt(r.target_loss_rate, 2)}</td>
+            <td>${fmt(r.realised_loss_rate, 4)}</td>
+            <td>${fmt(r.abs_error_L, 4)}</td>
+            <td>${fmt(r.target_mean_burst, 1)}</td>
+            <td>${fmt(r.realised_mean_burst, 3)}</td>
+            <td>${fmt(r.pct_error_B, 2)}%</td>
+            <td class="${r.within_tolerance ? 'ok' : 'bad'}">${
+              r.within_tolerance ? '&#10003; within' : '&#10007; out'}</td>
+          </tr>`).join('')}</tbody>
+      </table>
+    </div>
+    <div class="legend-note">
+      tolerance &plusmn;${fmt(ge.tolerance_L_abs, 2)} absolute on L,
+      &plusmn;${fmt(ge.tolerance_B_pct, 0)}% on B &middot;
+      ${ge.n_chains} chains &times; ${ge.steps_per_chain.toLocaleString()} steps
+    </div>
+    <div class="notice" style="margin-top:12px">${esc(ge.note || '')}</div>`;
+}
+</script>
+
+</body>
+</html>

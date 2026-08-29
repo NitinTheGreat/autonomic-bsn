@@ -1,0 +1,560 @@
+{
+  "generated_by": "scripts/export_phase3_samples.py",
+  "phase": 3,
+  "seed": 20260829,
+  "failure_types": [
+    "dropout",
+    "clock_desync",
+    "packet_loss",
+    "rate_degradation",
+    "displacement"
+  ],
+  "descriptions": {
+    "dropout": "Battery exhaustion -- node stops reporting mid-window (NaN).",
+    "clock_desync": "Timestamps drift out of alignment with the other nodes.",
+    "packet_loss": "Bursty BLE loss, Gilbert-Elliott two-state Markov chain.",
+    "rate_degradation": "Throttled node holding stale values (no gaps).",
+    "displacement": "Sensor rotated on the limb -- reference frame changes."
+  },
+  "units": {
+    "accel": "g",
+    "gyro": "deg/s"
+  },
+  "note": "NaN is exported as null so it renders as a GAP. It is never coerced to 0: zero is a real stationary reading, and a dropout drawn flat at zero would contradict the distinction this phase preserves.",
+  "datasets": {
+    "pamap2": {
+      "activities": {
+        "walking": {
+          "target_node": "ankle",
+          "failures": {
+            "dropout": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_walking_dropout_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_walking_dropout_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_walking_dropout_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_walking_dropout_sev4.json"
+                }
+              ]
+            },
+            "clock_desync": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_walking_clock_desync_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_walking_clock_desync_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_walking_clock_desync_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_walking_clock_desync_sev4.json"
+                }
+              ]
+            },
+            "packet_loss": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_walking_packet_loss_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_walking_packet_loss_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_walking_packet_loss_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_walking_packet_loss_sev4.json"
+                }
+              ]
+            },
+            "rate_degradation": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_walking_rate_degradation_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_walking_rate_degradation_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_walking_rate_degradation_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_walking_rate_degradation_sev4.json"
+                }
+              ]
+            },
+            "displacement": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_walking_displacement_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_walking_displacement_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_walking_displacement_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_walking_displacement_sev4.json"
+                }
+              ]
+            }
+          }
+        },
+        "running": {
+          "target_node": "ankle",
+          "failures": {
+            "dropout": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_running_dropout_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_running_dropout_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_running_dropout_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_running_dropout_sev4.json"
+                }
+              ]
+            },
+            "clock_desync": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_running_clock_desync_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_running_clock_desync_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_running_clock_desync_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_running_clock_desync_sev4.json"
+                }
+              ]
+            },
+            "packet_loss": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_running_packet_loss_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_running_packet_loss_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_running_packet_loss_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_running_packet_loss_sev4.json"
+                }
+              ]
+            },
+            "rate_degradation": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_running_rate_degradation_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_running_rate_degradation_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_running_rate_degradation_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_running_rate_degradation_sev4.json"
+                }
+              ]
+            },
+            "displacement": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_running_displacement_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_running_displacement_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_running_displacement_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_running_displacement_sev4.json"
+                }
+              ]
+            }
+          }
+        },
+        "sitting": {
+          "target_node": "ankle",
+          "failures": {
+            "dropout": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_sitting_dropout_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_sitting_dropout_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_sitting_dropout_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_sitting_dropout_sev4.json"
+                }
+              ]
+            },
+            "clock_desync": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_sitting_clock_desync_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_sitting_clock_desync_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_sitting_clock_desync_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_sitting_clock_desync_sev4.json"
+                }
+              ]
+            },
+            "packet_loss": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_sitting_packet_loss_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_sitting_packet_loss_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_sitting_packet_loss_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_sitting_packet_loss_sev4.json"
+                }
+              ]
+            },
+            "rate_degradation": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_sitting_rate_degradation_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_sitting_rate_degradation_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_sitting_rate_degradation_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_sitting_rate_degradation_sev4.json"
+                }
+              ]
+            },
+            "displacement": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "pamap2_sitting_displacement_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "pamap2_sitting_displacement_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "pamap2_sitting_displacement_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "pamap2_sitting_displacement_sev4.json"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "mhealth": {
+      "activities": {
+        "walking": {
+          "target_node": "ankle",
+          "failures": {
+            "dropout": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "mhealth_walking_dropout_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "mhealth_walking_dropout_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "mhealth_walking_dropout_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "mhealth_walking_dropout_sev4.json"
+                }
+              ]
+            },
+            "clock_desync": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "mhealth_walking_clock_desync_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "mhealth_walking_clock_desync_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "mhealth_walking_clock_desync_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "mhealth_walking_clock_desync_sev4.json"
+                }
+              ]
+            },
+            "packet_loss": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "mhealth_walking_packet_loss_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "mhealth_walking_packet_loss_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "mhealth_walking_packet_loss_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "mhealth_walking_packet_loss_sev4.json"
+                }
+              ]
+            },
+            "rate_degradation": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "mhealth_walking_rate_degradation_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "mhealth_walking_rate_degradation_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "mhealth_walking_rate_degradation_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "mhealth_walking_rate_degradation_sev4.json"
+                }
+              ]
+            },
+            "displacement": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "mhealth_walking_displacement_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "mhealth_walking_displacement_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "mhealth_walking_displacement_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "mhealth_walking_displacement_sev4.json"
+                }
+              ]
+            }
+          }
+        },
+        "running": {
+          "target_node": "ankle",
+          "failures": {
+            "dropout": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "mhealth_running_dropout_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "mhealth_running_dropout_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "mhealth_running_dropout_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "mhealth_running_dropout_sev4.json"
+                }
+              ]
+            },
+            "clock_desync": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "mhealth_running_clock_desync_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "mhealth_running_clock_desync_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "mhealth_running_clock_desync_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "mhealth_running_clock_desync_sev4.json"
+                }
+              ]
+            },
+            "packet_loss": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "mhealth_running_packet_loss_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "mhealth_running_packet_loss_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "mhealth_running_packet_loss_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "mhealth_running_packet_loss_sev4.json"
+                }
+              ]
+            },
+            "rate_degradation": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "mhealth_running_rate_degradation_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "mhealth_running_rate_degradation_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "mhealth_running_rate_degradation_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "mhealth_running_rate_degradation_sev4.json"
+                }
+              ]
+            },
+            "displacement": {
+              "severities": [
+                {
+                  "severity": 1,
+                  "file": "mhealth_running_displacement_sev1.json"
+                },
+                {
+                  "severity": 2,
+                  "file": "mhealth_running_displacement_sev2.json"
+                },
+                {
+                  "severity": 3,
+                  "file": "mhealth_running_displacement_sev3.json"
+                },
+                {
+                  "severity": 4,
+                  "file": "mhealth_running_displacement_sev4.json"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "n_files": 100
+}
