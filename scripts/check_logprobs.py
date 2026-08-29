@@ -27,6 +27,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _llm_client import (  # noqa: E402
     REPO_ROOT,
     LogprobError,
+    confidence_method_for,
+    describe_backend,
     load_config,
     resolve_backends,
     score_labels,
@@ -93,11 +95,19 @@ def main() -> int:
     out_path = args.out or os.path.join(
         REPO_ROOT, "results", "phase1", "logprob_check.json")
 
-    order = resolve_backends(cfg, args.backend)
+    try:
+        order = resolve_backends(cfg, args.backend)
+    except LogprobError as exc:
+        print("RESULT: FAIL")
+        print(exc)
+        return 1
 
     print("=" * 72)
     print("PHASE 1 / STEP 1 -- token logprob extraction check")
     print("=" * 72)
+    # Provenance banner: every run's log records which stack produced it.
+    for b in order:
+        print("resolved        : %s" % describe_backend(cfg, b))
     print("backends to try : %s" % ", ".join(order))
     print("n_probs         : %d   temperature: %s"
           % (n_probs, cfg["request"]["temperature"]))
@@ -119,6 +129,7 @@ def main() -> int:
 
         passed, reasons = evaluate(res["distribution"], margin)
         attempts.append({"backend": backend, "endpoint": res["endpoint"],
+                         "confidence_method": res.get("confidence_method"),
                          "ok": passed, "error": None if passed
                          else "; ".join(reasons)})
         if passed:
@@ -177,6 +188,7 @@ def main() -> int:
         "backend": winner["backend"],
         "endpoint": winner["endpoint"],
         "model": winner["model"],
+        "confidence_method": winner.get("confidence_method", "logprob"),
         "pass": True,
         "distribution": dist,
         "max_prob": max_prob,

@@ -75,6 +75,18 @@ def load_config(path: str | None = None) -> dict:
         return yaml.safe_load(fh)
 
 
+def require_api_key(backend: str, key_env: str) -> str:
+    """Read an API key from the environment, or fail with the exact fix."""
+    api_key = os.environ.get(key_env, "").strip()
+    if not api_key:
+        raise LogprobError(
+            backend + ": environment variable " + key_env + " is not set.\n"
+            "Copy .env.example to .env and put your key there, or export it:\n"
+            "  export " + key_env + "=your-key-here\n"
+            "(PowerShell:  $env:" + key_env + " = 'your-key-here')")
+    return api_key
+
+
 def _reject_ollama_compat(endpoint: str) -> None:
     """Hard-fail if a backend is pointed at Ollama's /v1 compat layer."""
     if re.search(r":11434\b", endpoint) and "/v1/" in endpoint:
@@ -260,6 +272,46 @@ def _extract_gemini(resp: dict) -> list[tuple[str, float]]:
     return out
 
 
+def _extract_openai(resp: dict) -> list[tuple[str, float]]:
+    """OpenAI chat/completions with logprobs: true, top_logprobs: N.
+
+    `top_logprobs` is capped at 20 by the API, which is why 20 is our default
+    and why the 8-label set (A-H) fits comfortably inside one request.
+    """
+    choices = resp.get("choices")
+    if not choices:
+        raise LogprobError(
+            "OpenAI response has no `choices`: " + repr(sorted(resp))[:300])
+
+    lp_obj = choices[0].get("logprobs")
+    if not lp_obj:
+        raise LogprobError(
+            "OpenAI response is missing the `logprobs` field.\n"
+            "Was `\"logprobs\": true` (and `top_logprobs`) sent, and does this "
+            "model support them? Refusing to continue -- returning a uniform "
+            "or single-token distribution here would silently destroy the "
+            "confidence signal this project measures."
+        )
+
+    content = lp_obj.get("content")
+    if not content:
+        raise LogprobError(
+            "OpenAI `logprobs` object has no `content` array (the model may "
+            "have returned no tokens). Keys were: " + repr(sorted(lp_obj)))
+
+    top = content[0].get("top_logprobs")
+    if not top:
+        raise LogprobError(
+            "OpenAI logprobs.content[0] has no `top_logprobs` -- only the "
+            "chosen token, which is not a distribution. Send top_logprobs: N.")
+
+    out = [(e["token"], float(e["logprob"])) for e in top
+           if e.get("token") is not None and e.get("logprob") is not None]
+    if not out:
+        raise LogprobError("OpenAI returned top_logprobs but none had a logprob")
+    return out
+
+
 _EXTRACTORS = {
     "llamacpp": _extract_llamacpp,
     "vllm": _extract_vllm,
@@ -268,7 +320,12 @@ _EXTRACTORS = {
     # Vertex returns the same generateContent body as the Developer API, so the
     # response parsing is identical; only the URL and the auth differ.
     "vertex": _extract_gemini,
+    "openai": _extract_openai,
 }
+
+# Styles that yield a genuine model-reported log-probability distribution.
+# `anthropic` is deliberately absent: see _score_self_consistency().
+LOGPROB_STYLES = frozenset(_EXTRACTORS)
 
 
 # --------------------------------------------------------------------------- #
@@ -354,6 +411,27 @@ def _build_payload(style: str, cfg_b: dict, prompt: str, n_probs: int,
             "top_logprobs": n_probs,
             "options": {"temperature": temperature, "num_predict": 1},
         }
+    if style == "openai":
+        return {
+            "model": cfg_b["model"],
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 1,
+            "temperature": temperature,
+            "logprobs": True,
+            # capped at 20 by the API; 20 comfortably covers the 8 label tokens
+            "top_logprobs": min(int(n_probs), 20),
+        }
+    if style == "anthropic":
+        # One sample of a self-consistency vote. Temperature comes from the
+        # backend config, NOT the global temperature: voting at temperature 0
+        # would return the same token k times and produce a degenerate
+        # all-or-nothing distribution.
+        return {
+            "model": cfg_b["model"],
+            "max_tokens": 1,
+            "temperature": float(cfg_b.get("sample_temperature", 0.7)),
+            "messages": [{"role": "user", "content": prompt}],
+        }
     if style in ("gemini", "vertex"):
         # The API caps `logprobs` at 20; 8 label letters fit comfortably.
         gen: dict = {
@@ -407,15 +485,17 @@ def call_backend(cfg: dict, backend: str, prompt: str, n_probs: int) -> dict:
     else:
         key_env = cfg_b.get("api_key_env")
         if key_env:
-            api_key = os.environ.get(key_env, "").strip()
-            if not api_key:
-                raise LogprobError(
-                    backend + ": environment variable " + key_env +
-                    " is not set.\nCopy .env.example to .env and put your key "
-                    "there, or export it in the shell:\n  export " + key_env +
-                    "=your-key-here\n"
-                    "(PowerShell:  $env:" + key_env + " = 'your-key-here')")
-            headers["x-goog-api-key"] = api_key
+            api_key = require_api_key(backend, key_env)
+            # Each provider wants the key in a different header.
+            auth_style = cfg_b.get("auth_style", "x-goog-api-key")
+            if auth_style == "bearer":
+                headers["Authorization"] = "Bearer " + api_key
+            elif auth_style == "x-api-key":
+                headers["x-api-key"] = api_key
+            else:
+                headers["x-goog-api-key"] = api_key
+    for k, v in (cfg_b.get("extra_headers") or {}).items():
+        headers[str(k)] = str(v)
 
     payload = _build_payload(style, cfg_b, prompt, n_probs,
                              float(cfg["request"]["temperature"]))
@@ -436,7 +516,9 @@ def call_backend(cfg: dict, backend: str, prompt: str, n_probs: int) -> dict:
         raise LogprobError(
             backend + ": non-JSON response: " + r.text[:300]) from exc
 
-    candidates = _EXTRACTORS[style](resp)
+    # Sampling backends (anthropic) have no logprobs to extract by design --
+    # the caller reads `raw` instead. Only logprob styles get an extractor.
+    candidates = _EXTRACTORS[style](resp) if style in _EXTRACTORS else []
     return {"candidates": candidates, "raw": resp, "endpoint": endpoint,
             "model": cfg_b.get("model", backend), "backend": backend}
 
@@ -455,6 +537,26 @@ def norm_token(tok: str) -> str:
 
 def score_labels(cfg: dict, backend: str, prompt: str, letters: list[str],
                  n_probs: int) -> dict:
+    """Probability distribution over `letters` for the model's answer token.
+
+    Single entry point for every backend. Two confidence methods exist and the
+    result always says which one produced it, via `confidence_method`:
+
+      "logprob"          the model's own next-token log-probabilities,
+                         softmax-renormalised over the label tokens.
+      "self_consistency" k sampled answers, distribution = vote fractions.
+                         Only the `anthropic` style, which has no logprobs.
+
+    These are NOT interchangeable and must never be pooled in one analysis.
+    """
+    style = cfg.get("backends", {}).get(backend, {}).get("style", backend)
+    if style == "anthropic":
+        return _score_self_consistency(cfg, backend, prompt, letters)
+    return _score_logprob(cfg, backend, prompt, letters, n_probs)
+
+
+def _score_logprob(cfg: dict, backend: str, prompt: str, letters: list[str],
+                   n_probs: int) -> dict:
     """Softmax-renormalised distribution over `letters` for the next token.
 
     Mass from tokenizer variants that normalise to the same letter (e.g. 'A'
@@ -488,6 +590,7 @@ def score_labels(cfg: dict, backend: str, prompt: str, letters: list[str],
     return {
         "distribution": dist,
         "argmax": max(dist, key=dist.get),
+        "confidence_method": "logprob",
         "n_letters_seen": len(keys),
         "missing_letters": sorted(wanted - set(keys)),
         "backend": call["backend"],
@@ -497,9 +600,123 @@ def score_labels(cfg: dict, backend: str, prompt: str, letters: list[str],
     }
 
 
+def _score_self_consistency(cfg: dict, backend: str, prompt: str,
+                            letters: list[str]) -> dict:
+    """Sampling-based confidence for backends with NO logprobs (Anthropic).
+
+    The Anthropic Messages API exposes no logprobs or top_logprobs -- there is
+    no parameter for it and no model that enables it. So this backend CANNOT
+    satisfy Gate 1, and is not a drop-in substitute for a logprob backend.
+
+    Instead we estimate confidence by self-consistency: sample the same prompt
+    k times at a non-zero temperature and use the vote fraction per label as
+    the probability. This is a legitimate, literature-supported estimator and
+    is empirically better calibrated than asking a model to verbalise its own
+    confidence -- but it costs k x inference, and its resolution is bounded by
+    1/k (with k=10 the finest distinguishable confidence step is 0.1, which
+    matters when binning for ECE later).
+
+    Treat it as a ROBUSTNESS CHECK against the logprob results, never as the
+    primary method, and never pool the two in a single analysis.
+    """
+    cfg_b = cfg["backends"][backend]
+    k = int(cfg_b.get("k_samples", 10))
+    wanted = {l.upper() for l in letters}
+
+    votes: dict[str, int] = {l.upper(): 0 for l in letters}
+    raw_answers: list[str] = []
+    unparsed = 0
+
+    for _ in range(k):
+        call = call_backend(cfg, backend, prompt, 1)
+        text = _anthropic_text(call["raw"])
+        raw_answers.append(text)
+        key = norm_token(text)[:1]        # first char, normalised
+        if key in wanted:
+            votes[key] += 1
+        else:
+            unparsed += 1
+
+    counted = k - unparsed
+    if counted == 0:
+        raise LogprobError(
+            "anthropic: none of the " + str(k) + " sampled answers contained a "
+            "valid label letter. Wanted " + repr(sorted(wanted)) + ", got " +
+            repr(raw_answers[:10]) + ". The prompt is not steering the model "
+            "to answer with a bare letter.")
+
+    dist = {l: votes[l.upper()] / counted for l in letters}
+
+    return {
+        "distribution": dist,
+        "argmax": max(dist, key=dist.get),
+        "confidence_method": "self_consistency",
+        "k_samples": k,
+        # Resolution floor: vote fractions are multiples of 1/counted.
+        "probability_resolution": 1.0 / counted,
+        "n_valid_samples": counted,
+        "n_unparsed_samples": unparsed,
+        "sample_temperature": float(cfg_b.get("sample_temperature", 0.7)),
+        "n_letters_seen": sum(1 for v in votes.values() if v),
+        "missing_letters": sorted(l for l in wanted if not votes[l]),
+        "backend": backend,
+        "endpoint": cfg_b["endpoint"],
+        "model": cfg_b.get("model", backend),
+        "raw_answers": raw_answers,
+    }
+
+
+def _anthropic_text(resp: dict) -> str:
+    """Pull the answer text out of an Anthropic Messages response."""
+    if "error" in resp:
+        raise LogprobError("anthropic API error: " + str(resp["error"])[:300])
+    for b in (resp.get("content") or []):
+        if b.get("type") == "text" and b.get("text"):
+            return str(b["text"])
+    return ""
+
+
+def confidence_method_for(cfg: dict, backend: str) -> str:
+    """Which confidence method a backend yields, without calling it."""
+    style = cfg.get("backends", {}).get(backend, {}).get("style", backend)
+    return "logprob" if style in LOGPROB_STYLES else "self_consistency"
+
+
 def resolve_backends(cfg: dict, override: str | None = None) -> list[str]:
-    """Ordered list of backends to try. 'auto' expands to fallback_order."""
-    chosen = override or cfg.get("backend", "llamacpp")
+    """Ordered list of backends to try.
+
+    Precedence: explicit argument (a --backend flag) > BSN_BACKEND env var >
+    `backend:` in models.yaml. The env var lets the user switch stacks without
+    editing a tracked file.
+
+    'auto' expands to fallback_order, which contains ONLY logprob backends.
+    `anthropic` is deliberately excluded from that chain: silently falling back
+    from a logprob method to a sampling method would change what the numbers
+    mean with no visible signal. It must be selected explicitly.
+    """
+    chosen = override or os.environ.get("BSN_BACKEND", "").strip() \
+        or cfg.get("backend", "llamacpp")
+
+    if cfg.get("require_logprobs") and chosen != "auto":
+        if confidence_method_for(cfg, chosen) != "logprob":
+            raise LogprobError(
+                "Backend '" + chosen + "' provides confidence by "
+                "self-consistency sampling, not model log-probabilities, but "
+                "`require_logprobs: true` is set in configs/models.yaml.\n"
+                "Refusing to run: these two are not interchangeable and their "
+                "numbers must never be pooled in one analysis.\n"
+                "Either pick a logprob backend (openai, llamacpp, vllm), or "
+                "set require_logprobs: false to accept sampling-based "
+                "confidence deliberately.")
+
     if chosen == "auto":
         return list(cfg.get("fallback_order", ["llamacpp"]))
     return [chosen]
+
+
+def describe_backend(cfg: dict, backend: str) -> str:
+    """One-line provenance banner: which stack produced this run's numbers."""
+    cfg_b = cfg.get("backends", {}).get(backend, {})
+    return ("backend=%s  model=%s  confidence_method=%s"
+            % (backend, cfg_b.get("model", "?"),
+               confidence_method_for(cfg, backend)))

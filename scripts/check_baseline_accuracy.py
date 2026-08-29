@@ -35,6 +35,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _llm_client import (  # noqa: E402
     REPO_ROOT,
     LogprobError,
+    confidence_method_for,
+    describe_backend,
     load_config,
     resolve_backends,
     score_labels,
@@ -466,10 +468,15 @@ def main() -> int:
           % (len(sample), sorted({w["subject"] for w in sample})))
 
     # ---- classify --------------------------------------------------------- #
-    backend = resolve_backends(cfg, args.backend)[0]
+    try:
+        backend = resolve_backends(cfg, args.backend)[0]
+    except LogprobError as exc:
+        print("FATAL: %s" % exc)
+        return 1
     n_probs = int(cfg["request"].get("step2_n_probs", 20))
-    print("Classifying with backend '%s' (argmax over 8 label tokens via "
-          "logprobs, not free-text)..." % backend)
+    conf_method = confidence_method_for(cfg, backend)
+    print("resolved: %s" % describe_backend(cfg, backend))
+    print("Classifying (argmax over the 8 label tokens, not free-text)...")
 
     y_true, y_pred, per_window = [], [], []
     for n, w in enumerate(sample, 1):
@@ -515,6 +522,7 @@ def main() -> int:
         "fewshot_subjects_used": sorted({d["subject"] for d in fs_used}),
         "model": cfg["backends"][backend].get("model", backend),
         "backend": backend,
+        "confidence_method": conf_method,
         "pass": passed,
         "pass_threshold": threshold,
         "prompt_template": PROMPT_TEMPLATE,
