@@ -1,5 +1,6 @@
 # Phase 1 de-risking only. Deliberately minimal -- no agent framework yet.
 requests>=2.31
 PyYAML>=6.0
+google-auth>=2.30     # Vertex AI (OAuth2 bearer tokens)
 numpy>=1.24
 pandas>=2.0

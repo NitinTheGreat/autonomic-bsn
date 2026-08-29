@@ -5,30 +5,54 @@
 # recorded in results/phase1/logprob_check.json and every later phase must use
 # that same one.
 #
-# backend: gemini | llamacpp | vllm | ollama_native | auto
+# backend: vertex | llamacpp | vllm | gemini | ollama_native | auto
 #   auto -> try each entry of `fallback_order` until one returns real logprobs.
-backend: gemini
+backend: vertex
 
 # Ollama is deliberately NOT in this chain (see ollama_native below).
-fallback_order: [gemini, llamacpp, vllm]
+# `gemini` is also excluded: the Developer API surface rejects logprobs on
+# every model (verified live -- see README), so it can never satisfy gate 1.
+fallback_order: [vertex, llamacpp, vllm]
 
 backends:
   # ---------------------------------------------------------------- HOSTED --
-  # Google Gemini. Needs GEMINI_API_KEY (see .env.example).
+  # Vertex AI (Google Cloud) -- the surface where Gemini logprobs are actually
+  # available. Same generateContent body as the Developer API; different URL
+  # and OAuth2 (bearer token) auth instead of an API key.
   #
-  # !! MODEL RESTRICTION -- READ BEFORE CHANGING `model` !!
-  # responseLogprobs works on gemini-2.5-flash / gemini-2.5-pro.
-  # It does NOT work on the Gemini 3.x family (gemini-3-flash, gemini-3-pro):
-  # those either reject the request with "Logprobs is not supported for this
-  # model" or return a candidate with logprobsResult absent/null. Since this
-  # whole project measures model confidence, a model without logprobs is
-  # unusable here regardless of how good its text output is.
+  # Requires:
+  #   - a GCP project with billing enabled and the Vertex AI API enabled
+  #   - GOOGLE_CLOUD_PROJECT in .env
+  #   - credentials: either GOOGLE_APPLICATION_CREDENTIALS pointing at a
+  #     service-account JSON key with the "Vertex AI User" role, or
+  #     `gcloud auth application-default login`
   #
-  # `logprobs` is capped at 20 by the API, which comfortably covers our 8
-  # label tokens.
+  # NOTE: logprobs entitlement on Vertex has NOT been verified for this
+  # account. check_logprobs.py exists precisely to answer that -- run it first
+  # and believe its output, not this comment.
+  vertex:
+    endpoint: "https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent"
+    model: "gemini-2.5-flash"
+    style: vertex
+    # Leave blank to read GOOGLE_CLOUD_PROJECT / GOOGLE_CLOUD_LOCATION from .env
+    project: ""
+    location: "us-central1"
+    thinking_budget: 0
+
+  # ----------------------------------------------------- NOT IN THE CHAIN --
+  # Gemini DEVELOPER API (AI Studio key). VERIFIED NON-WORKING for this
+  # project: on 2026-08-29 all 12 probed models -- gemini-2.5-flash,
+  # gemini-2.5-pro, gemini-flash-latest, gemini-3-flash-preview,
+  # gemini-3.5-flash, gemini-3.7-flash, gemma-4-31b-it and others -- returned
+  #     400 "Logprobs is not enabled for this model"
+  # while returning 200 for plain generation. The block is on this API surface,
+  # not on a particular model, so changing `model` will NOT help.
+  #
+  # Use `vertex` above instead. This entry is kept so the finding is not
+  # rediscovered the hard way, and in case the entitlement is ever enabled.
   gemini:
     endpoint: "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    model: "gemini-2.5-flash"     # verified to support logprobs
+    model: "gemini-2.5-flash"     # irrelevant: surface rejects logprobs
     style: gemini
     api_key_env: GEMINI_API_KEY
     # 2.5-series models spend output tokens on internal "thinking" by default,

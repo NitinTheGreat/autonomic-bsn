@@ -265,7 +265,61 @@ _EXTRACTORS = {
     "vllm": _extract_vllm,
     "ollama_native": _extract_ollama_native,
     "gemini": _extract_gemini,
+    # Vertex returns the same generateContent body as the Developer API, so the
+    # response parsing is identical; only the URL and the auth differ.
+    "vertex": _extract_gemini,
 }
+
+
+# --------------------------------------------------------------------------- #
+# Vertex AI auth
+# --------------------------------------------------------------------------- #
+_VERTEX_CREDS = None      # cached across calls: a run makes ~150 requests
+
+
+def _vertex_token() -> str:
+    """OAuth2 access token for Vertex AI, from a service account or ADC.
+
+    Resolution order is google-auth's own default():
+      1. GOOGLE_APPLICATION_CREDENTIALS -> service-account JSON key
+      2. gcloud application-default credentials
+      3. the attached service account, on GCP compute
+    The credential object is cached and refreshed only when expired, so a
+    150-window accuracy run does not re-mint a token per request.
+    """
+    global _VERTEX_CREDS
+    try:
+        import google.auth
+        import google.auth.transport.requests
+        from google.auth.exceptions import DefaultCredentialsError
+    except ImportError as exc:
+        raise LogprobError(
+            "vertex: google-auth is not installed. Run:\n"
+            "  pip install -r requirements.txt") from exc
+
+    if _VERTEX_CREDS is None:
+        try:
+            creds, _ = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        except DefaultCredentialsError as exc:
+            raise LogprobError(
+                "vertex: no Google Cloud credentials found.\n"
+                "Set up ONE of these:\n"
+                "  A) Service account (no gcloud CLI needed):\n"
+                "     - create a key in the GCP console, save the JSON\n"
+                "     - grant it the 'Vertex AI User' role\n"
+                "     - set GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json "
+                "in .env\n"
+                "  B) gcloud CLI:\n"
+                "     gcloud auth application-default login\n"
+                "\nOriginal error: " + str(exc)[:200]) from exc
+        _VERTEX_CREDS = creds
+
+    if not _VERTEX_CREDS.valid:
+        _VERTEX_CREDS.refresh(
+            __import__("google.auth.transport.requests",
+                       fromlist=["Request"]).Request())
+    return _VERTEX_CREDS.token
 
 
 # --------------------------------------------------------------------------- #
@@ -300,7 +354,7 @@ def _build_payload(style: str, cfg_b: dict, prompt: str, n_probs: int,
             "top_logprobs": n_probs,
             "options": {"temperature": temperature, "num_predict": 1},
         }
-    if style == "gemini":
+    if style in ("gemini", "vertex"):
         # The API caps `logprobs` at 20; 8 label letters fit comfortably.
         gen: dict = {
             "temperature": temperature,
@@ -328,21 +382,40 @@ def call_backend(cfg: dict, backend: str, prompt: str, n_probs: int) -> dict:
     cfg_b = cfg["backends"][backend]
     style = cfg_b.get("style", backend)
 
-    # {model} lets a hosted endpoint carry the model in its path (Gemini does).
-    endpoint = cfg_b["endpoint"].replace("{model}", str(cfg_b.get("model", "")))
+    # Hosted endpoints carry the model (and for Vertex, the project/location)
+    # in their path. Values may come from config or the environment.
+    project = (cfg_b.get("project")
+               or os.environ.get("GOOGLE_CLOUD_PROJECT", "")).strip()
+    location = (cfg_b.get("location")
+                or os.environ.get("GOOGLE_CLOUD_LOCATION", "")
+                or "us-central1").strip()
+    endpoint = (cfg_b["endpoint"]
+                .replace("{model}", str(cfg_b.get("model", "")))
+                .replace("{project}", project)
+                .replace("{location}", location))
     _reject_ollama_compat(endpoint)
 
-    headers, key_env = {}, cfg_b.get("api_key_env")
-    if key_env:
-        api_key = os.environ.get(key_env, "").strip()
-        if not api_key:
+    headers: dict[str, str] = {}
+
+    if style == "vertex":
+        if not project:
             raise LogprobError(
-                backend + ": environment variable " + key_env + " is not set.\n"
-                "Copy .env.example to .env and put your key there, or export "
-                "it in the shell:\n  export " + key_env + "=your-key-here\n"
-                "(PowerShell:  $env:" + key_env + " = 'your-key-here')"
-            )
-        headers["x-goog-api-key"] = api_key
+                "vertex: no GCP project set. Put your project id in .env as\n"
+                "  GOOGLE_CLOUD_PROJECT=my-project-id\n"
+                "or set backends.vertex.project in configs/models.yaml.")
+        headers["Authorization"] = "Bearer " + _vertex_token()
+    else:
+        key_env = cfg_b.get("api_key_env")
+        if key_env:
+            api_key = os.environ.get(key_env, "").strip()
+            if not api_key:
+                raise LogprobError(
+                    backend + ": environment variable " + key_env +
+                    " is not set.\nCopy .env.example to .env and put your key "
+                    "there, or export it in the shell:\n  export " + key_env +
+                    "=your-key-here\n"
+                    "(PowerShell:  $env:" + key_env + " = 'your-key-here')")
+            headers["x-goog-api-key"] = api_key
 
     payload = _build_payload(style, cfg_b, prompt, n_probs,
                              float(cfg["request"]["temperature"]))

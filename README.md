@@ -17,9 +17,11 @@ python -m venv .venv
 .venv\Scripts\activate                 # PowerShell;  source .venv/bin/activate on Unix
 pip install -r requirements.txt
 
-# 2. add your API key
+# 2. set up Vertex AI auth (see "Model backends" below)
 copy .env.example .env                 # PowerShell;  cp .env.example .env on Unix
-#    then edit .env and set GEMINI_API_KEY
+#    then edit .env: GOOGLE_CLOUD_PROJECT, and either
+#    GOOGLE_APPLICATION_CREDENTIALS (service-account JSON) or `gcloud auth
+#    application-default login`
 
 # 3. get the data  (see data/raw/README.md for the download commands)
 #    expected: data/raw/pamap2/Protocol/subject101.dat ... subject109.dat
@@ -91,7 +93,25 @@ AI Studio keys). Google's logprobs guide targets **Vertex AI**
 billing and service-account auth.
 
 **A model without logprobs cannot be used for this project**, however good its
-text output is. Use a local backend (`llamacpp`, `vllm`) or Vertex AI.
+text output is. The default backend is therefore `vertex`, not `gemini`.
+
+### Vertex AI setup (the default backend)
+
+Vertex AI is the Google Cloud surface where Gemini logprobs are available. It
+needs a GCP project rather than an AI Studio key.
+
+1. Create or choose a GCP project and **enable billing**.
+2. Enable the [Vertex AI API](https://console.cloud.google.com/apis/library/aiplatform.googleapis.com).
+3. Authenticate with **either**:
+   - **Service account** (no CLI needed) — IAM &amp; Admin → Service Accounts →
+     create one, grant it **Vertex AI User**, create a JSON key, save it
+     *outside* the repo, and set `GOOGLE_APPLICATION_CREDENTIALS` in `.env`.
+   - **gcloud CLI** — `gcloud auth application-default login`.
+4. Put your project id in `.env` as `GOOGLE_CLOUD_PROJECT`.
+
+Then run `python scripts/check_logprobs.py`. It exists precisely to prove
+whether logprobs really work on your account — believe its output over any
+documentation, including this README.
 
 ### ⚠️ Never use Ollama's OpenAI-compat endpoint
 
@@ -110,9 +130,10 @@ walk `fallback_order` until one returns real logprobs.
 
 | Backend | Endpoint | Notes |
 |---|---|---|
-| `gemini` *(default)* | `generateContent` | needs `GEMINI_API_KEY`; `logprobs` capped at 20 |
+| `vertex` *(default)* | `aiplatform.googleapis.com` | GCP project + OAuth2; `logprobs` capped at 20 |
 | `llamacpp` | `POST /completion` | local, CPU-friendly |
 | `vllm` | `POST /v1/completions` | local; genuinely supports logprobs |
+| `gemini` | `generativelanguage.googleapis.com` | **verified non-working** — rejects logprobs |
 | `ollama_native` | `POST /api/generate` | reference only, not in the chain |
 
 Whichever backend passes is recorded as `backend` in

@@ -55,7 +55,8 @@ Selected by `backend:` in `configs/models.yaml`; `auto` walks `fallback_order`.
 
 | Backend | Endpoint | How logprobs are requested |
 |---|---|---|
-| `gemini` *(default)* | `generateContent` | `responseLogprobs: true`, `logprobs: N` (API caps N at 20) |
+| `vertex` *(default)* | Vertex `generateContent` | `responseLogprobs: true`, `logprobs: N`; OAuth2 bearer, GCP project |
+| `gemini` | Developer `generateContent` | **verified non-working** — surface rejects logprobs |
 | `llamacpp` | `POST /completion` | `n_probs`, `post_sampling_probs: false` |
 | `vllm` | `POST /v1/completions` | `logprobs: N`, `echo: true` |
 | `ollama_native` | `POST /api/generate` | kept for reference, **removed from the fallback chain** |
@@ -109,10 +110,12 @@ what this phase was built to catch -- but a different backend is required.
 Since this project measures model confidence, a model without logprobs is
 unusable here **regardless of how good its text output is**.
 
-> **Open decision for the user.** Gate 1 needs either Vertex AI (same Gemini
-> models, different surface, needs a GCP project + billing + service-account
-> auth) or a local backend (llama.cpp / vLLM, already implemented and tested).
-> See "Open questions".
+> **Decision taken (2026-08-29): Vertex AI.** A `vertex` backend was added and
+> is now the default. It reuses the Gemini response parsing (same
+> generateContent body) but authenticates with an OAuth2 bearer token from a
+> service account or ADC, and carries project/location in the URL.
+> **Whether this account is entitled to logprobs on Vertex is still unverified**
+> — `check_logprobs.py` answers that, and its output is the authority.
 
 The Gemini backend code is kept and is correct -- if the account is later
 enabled for logprobs, or is pointed at Vertex, it will work unchanged. Two
@@ -229,10 +232,11 @@ at runtime — the script aborts if they overlap).
 
 ## 7. Current blockers
 
-1. **A backend that actually exposes logprobs.** The Gemini Developer API does
-   not (see 3.2). `GEMINI_API_KEY` is set and valid, but every model rejects
-   logprobs. Switch `backend:` in `configs/models.yaml` to `llamacpp` and run
-   `llama-server -m <gguf> -c 4096 --port 8080`, or add a Vertex AI backend.
+1. **Vertex AI credentials.** The `vertex` backend is implemented and its code
+   path is verified against a mock, but this machine has no GCP auth: no
+   gcloud CLI, no ADC, no service-account key. Set `GOOGLE_CLOUD_PROJECT` and
+   either `GOOGLE_APPLICATION_CREDENTIALS` or run
+   `gcloud auth application-default login`. See `.env.example`.
 2. Then run, in order:
    ```bash
    python scripts/check_logprobs.py            # must PASS before anything else
