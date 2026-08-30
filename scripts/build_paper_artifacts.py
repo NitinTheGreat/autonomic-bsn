@@ -313,8 +313,8 @@ def build_reproducibility(D) -> str:
     if b8:
         parts += [
             "## Gate 2 protocol", "",
-            "- Windows: 2.56 s, 50 %% overlap, cut only inside contiguous "
-            "single-activity segments, >=60 %% sample coverage",
+            "- Windows: 2.56 s, 50 % overlap, cut only inside contiguous "
+            "single-activity segments, >=60 % sample coverage",
             "- Features: 3 nodes x 3 axes x 5 statistics = 45 per window",
             "- Test subjects: %s" % b8.get("subjects_used"),
             "- Few-shot subjects: %s (disjoint, enforced at runtime)"

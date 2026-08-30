@@ -6,8 +6,13 @@ data/raw/*
 !data/raw/README.md
 
 # --- generated results (regenerate with the phase scripts) ---
-results/
+# Ignore the CONTENTS, not the directory: git cannot re-include a file whose
+# parent directory is excluded, and the paper write-ups must stay tracked.
+results/*
 frontend/results/
+!results/paper/
+results/paper/*
+!results/paper/*.md
 
 # --- secrets: never commit API keys ---
 .env
