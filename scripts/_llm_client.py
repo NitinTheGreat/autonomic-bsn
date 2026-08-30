@@ -95,6 +95,18 @@ def require_api_key(backend: str, key_env: str) -> str:
     return api_key
 
 
+# 429 bodies that mean "this will never succeed on its own" rather than
+# "slow down". Retrying these only delays an unavoidable, actionable error.
+_PERMANENT_429 = ("insufficient_quota", "credit_balance_exhausted",
+                  "no credits remaining", "billing_hard_limit_reached",
+                  "exceeded your current quota")
+
+
+def _is_permanent_quota_failure(body: str) -> bool:
+    low = (body or "").lower()
+    return any(m in low for m in _PERMANENT_429)
+
+
 def _reject_ollama_compat(endpoint: str) -> None:
     """Hard-fail if a backend is pointed at Ollama's /v1 compat layer."""
     if re.search(r":11434\b", endpoint) and "/v1/" in endpoint:
@@ -543,6 +555,11 @@ def call_backend(cfg: dict, backend: str, prompt: str, n_probs: int) -> dict:
                                    " -- " + str(exc)) from exc
             time.sleep(backoff * (2 ** attempt))
             continue
+        # A 429 is usually a rate limit and worth retrying -- but an exhausted
+        # credit balance also returns 429, and no amount of backoff fixes that.
+        # Retrying it just burns six sleeps before reporting the same thing.
+        if r.status_code == 429 and _is_permanent_quota_failure(r.text):
+            break
         if r.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
             # Honour Retry-After when the server sends one.
             wait = backoff * (2 ** attempt)
@@ -557,10 +574,16 @@ def call_backend(cfg: dict, backend: str, prompt: str, n_probs: int) -> dict:
         break
 
     if r.status_code != 200:
+        hint = ""
+        if r.status_code == 429 and _is_permanent_quota_failure(r.text):
+            hint = ("\nThis is a BILLING failure, not a rate limit -- retrying "
+                    "will not help. Add credits, or switch provider with "
+                    "LLM_PROVIDER=cerebras (free) or LLM_PROVIDER=llamacpp "
+                    "(local).")
         # Surface the API's own message: it names the real cause (bad key,
         # quota, or "Logprobs is not supported for this model").
         raise LogprobError(backend + ": HTTP " + str(r.status_code) + " from " +
-                           endpoint + ": " + r.text[:500])
+                           endpoint + ": " + r.text[:400] + hint)
     try:
         resp = r.json()
     except json.JSONDecodeError as exc:

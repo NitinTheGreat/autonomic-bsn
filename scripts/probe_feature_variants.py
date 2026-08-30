@@ -156,14 +156,37 @@ def run_one(variant: str, label_set: str, backend: str, n_windows: int,
     apply_label_set(SIX if label_set == "6" else EIGHT)
     argv = ["check_baseline_accuracy.py", "--n-windows", str(n_windows),
             "--out", tmp, "--backend", backend]
+    # Delete the temp file FIRST. Without this, a cell that aborts (a rate
+    # limit, say) leaves the PREVIOUS cell's output in place and this function
+    # silently returns it as the new result -- which is exactly how three
+    # different variants came back with one identical accuracy.
+    for p in (tmp, os.path.join(REPO_ROOT, "frontend", "results", "phase1",
+                                os.path.basename(tmp))):
+        if os.path.isfile(p):
+            os.remove(p)
+
     old = sys.argv
     sys.argv = argv
     try:
-        B.main()
+        rc = B.main()
     finally:
         sys.argv = old
+
+    if not os.path.isfile(tmp):
+        raise RuntimeError(
+            "run %s/%s produced no output (exit %s) -- the cell aborted, most "
+            "likely a rate limit or an unparseable answer. Refusing to reuse a "
+            "stale result." % (variant, label_set, rc))
     with open(tmp, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+        d = json.load(fh)
+    # Cross-check that the file we just read really is this cell's.
+    n_classes = len(d.get("confusion_matrix_labels") or [])
+    expected = 6 if label_set == "6" else 8
+    if n_classes != expected:
+        raise RuntimeError(
+            "run %s/%s returned a %d-class result, expected %d -- stale or "
+            "mismatched output" % (variant, label_set, n_classes, expected))
+    return d
 
 
 def main() -> int:
@@ -200,14 +223,13 @@ def main() -> int:
             print("-" * 78)
             try:
                 r = run_one(v, ls, args.backend, args.n_windows, tmp)
-            except FileNotFoundError:
+            except (FileNotFoundError, RuntimeError) as exc:
                 # The inner run aborted (e.g. the model never emitted a label
                 # token). Record the failure rather than crashing the sweep.
-                print("  -> RUN FAILED, recorded as unusable")
+                print("  -> RUN FAILED: %s" % str(exc)[:150])
                 runs[key] = {"variant": v, "label_set": int(ls),
                              "overall_accuracy": None, "pass": False,
-                             "failed": True,
-                             "reason": "model did not emit a bare label token"}
+                             "failed": True, "reason": str(exc)[:300]}
                 continue
             runs[key] = {
                 "variant": v, "label_set": int(ls),

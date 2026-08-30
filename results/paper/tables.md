@@ -33,6 +33,14 @@ _Generated 2026-08-30 by `scripts/build_paper_artifacts.py`. Every number is rea
 |---|---|---|---|---|---|---|
 | openai | gpt-4o | V0 (shipped) | 8 | 144 | 0.4722 | FAIL |
 | openai | gpt-4o | V0 (shipped) | 6 | 96 | 0.5833 | FAIL |
+| openai | `openai` | V0 | 8 | -- | not run (no credits) | -- |
+| openai | `openai` | V0F | 8 | -- | not run (no credits) | -- |
+| openai | `openai` | V1 | 8 | -- | not run (no credits) | -- |
+| cerebras | `cerebras` | V0 | 6 | -- | unusable (no bare-letter answer) | -- |
+| cerebras | `cerebras` | V0 | 8 | -- | unusable (no bare-letter answer) | -- |
+| cerebras | `gemma-4-31b` | V0F | 6 | 48 | 0.8125 | PASS |
+| cerebras | `gemma-4-31b` | V0F | 8 | 48 | 0.6667 | PASS |
+| cerebras | `gemma-4-31b` | V1 | 8 | 48 | 0.7083 | PASS |
 
 > V0 is the shipped rendering (45 raw numbers in m/s², orientation implicit). V0F changes only the answer-format instruction. V1 re-presents the **same 45 features** with an explicit per-node orientation unit vector and motion level, in g. No new sensor channels are introduced in any variant.
 

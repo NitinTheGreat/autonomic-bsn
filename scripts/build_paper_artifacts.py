@@ -160,12 +160,23 @@ def table_ablation(D) -> str:
             continue
         for cell, r in sorted(fv.get("runs", {}).items()):
             acc = r.get("overall_accuracy")
+            kind = r.get("failure_kind")
+            # A cell that never ran (billing) and a cell whose model refused to
+            # answer in the required format are different facts. Collapsing
+            # both to "failed" would misreport the second as a model result.
+            if acc is None:
+                shown = {"billing": "not run (no credits)",
+                         "prompt_not_portable":
+                             "unusable (no bare-letter answer)"}.get(
+                                 kind, "failed")
+                verdict = "--"
+            else:
+                shown, verdict = fmt(acc, 4), ("PASS" if r.get("pass")
+                                               else "FAIL")
             rows.append([
                 prov, "`%s`" % (r.get("model") or fv.get("backend")),
                 r["variant"], r["label_set"], r.get("n_windows", "--"),
-                "FAILED" if acc is None else fmt(acc, 4),
-                "PASS" if r.get("pass") else
-                ("UNUSABLE" if acc is None else "FAIL"),
+                shown, verdict,
             ])
     return md_table(
         ["Provider", "Model", "Variant", "Classes", "n", "Accuracy",
