@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase 5 - Agent Playground</title>
+<link rel="stylesheet" href="shared/style.css">
+<style>
+  .banner {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    background: rgba(232,163,61,.09); border: 1px solid var(--accent);
+    border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: var(--gap);
+    font-size: .82rem;
+  }
+  .banner b { color: var(--accent); }
+  .banner .sep { color: var(--muted); }
+  .verdict-card {
+    border: 1px solid var(--border-strong); border-left: 4px solid var(--fail);
+    border-radius: var(--radius-sm); padding: 12px 15px; margin-top: 12px;
+    background: rgba(242,85,90,.07);
+  }
+  .verdict-card.ok { border-left-color: var(--pass);
+                     background: rgba(62,207,142,.07); }
+  .picker select {
+    width: 100%; max-width: 560px; padding: 9px 11px; background: #0c1020;
+    color: var(--text); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); font-size: .88rem;
+  }
+  .predrow { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; }
+  .predbox { flex: 1; min-width: 170px; background: rgba(232,236,247,.04);
+             border: 1px solid var(--border); border-radius: var(--radius-sm);
+             padding: 11px 13px; }
+  .predbox .k { font-size: .66rem; letter-spacing: .09em;
+                text-transform: uppercase; color: var(--muted); }
+  .predbox .v { font-family: var(--mono); font-size: 1.05rem; margin-top: 3px; }
+  .predbox.hit  { border-color: var(--pass); }
+  .predbox.miss { border-color: var(--fail); }
+  .predbox.hit .v  { color: var(--pass); }
+  .predbox.miss .v { color: var(--fail); }
+  .conf { display: flex; flex-wrap: wrap; gap: 12px; }
+  .conf .c { flex: 1; min-width: 150px; background: rgba(232,236,247,.04);
+             border: 1px solid var(--border); border-radius: var(--radius-sm);
+             padding: 11px 13px; }
+  .conf .c.primary { border-color: var(--accent); }
+  .conf .c .n { font-family: var(--mono); font-size: 1.2rem; color: var(--text); }
+  .conf .c.primary .n { color: var(--accent); }
+  .conf .c .k { font-size: .66rem; letter-spacing: .09em;
+                text-transform: uppercase; color: var(--muted); }
+  .conf .c .why { font-size: .7rem; color: var(--muted); margin-top: 5px; }
+  table.h { border-collapse: collapse; width: 100%; font-size: .78rem; }
+  table.h th, table.h td { padding: 6px 9px; border-bottom: 1px solid var(--border);
+                           text-align: left; }
+  table.h th { color: var(--muted); font-weight: 500; }
+  table.h td { font-family: var(--mono); font-size: .75rem; }
+  .st-HEALTHY { color: var(--pass); } .st-DEGRADED { color: var(--accent); }
+  .st-UNRELIABLE { color: #e8763d; } .st-OFFLINE { color: var(--fail); }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header class="page-head">
+    <div class="eyebrow">Phase 5</div>
+    <h1>Baseline agent (S1) playground</h1>
+    <p class="muted">
+      The simplest correct pipeline: <code class="mono">ingest &rarr;
+      context_build &rarr; har_agent &rarr; confidence</code>, exactly one model
+      call. S1 <em>shows</em> the agent each node's health state but does not
+      act on it &mdash; no trust reweighting, no abstention. Those are Phase 7,
+      and keeping them out is what makes S1 a usable baseline.
+    </p>
+  </header>
+
+  <div id="banner"></div>
+  <div id="verdict"></div>
+
+  <section class="card">
+    <div class="card-title"><h2>Window</h2>
+      <span class="small muted" id="pick-meta"></span></div>
+    <div class="picker" id="picker"></div>
+    <div id="prediction"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><h2>Confidence</h2>
+      <span class="small muted">three readouts at different resolutions</span></div>
+    <div id="confidence"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><h2>Probability distribution</h2>
+      <span class="small muted">all 8 labels</span></div>
+    <div id="dist"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title"><h2>Health shown to the model</h2>
+      <span class="small muted">perceived, not acted on &mdash; S1 has no mitigation</span></div>
+    <div id="health"></div>
+  </section>
+</div>
+
+<script type="module">
+import { loadJSONAny, esc, fmt, notGenerated } from './shared/app.js';
+
+/* Provider is a dimension: look through every provider folder that exists. */
+const PROVIDERS = ['cerebras_gemma-4-31b', 'openai_gpt-4o'];
+const paths = (f) => PROVIDERS.flatMap((p) => [
+  `results/paper/by_provider/${p}/${f}`,
+  `../results/paper/by_provider/${p}/${f}`,
+]);
+
+const [S, H] = await Promise.all([
+  loadJSONAny(paths('phase5_samples.json')),
+  loadJSONAny(paths('confidence_headroom.json')),
+]);
+
+const bannerEl = document.getElementById('banner');
+const verdictEl = document.getElementById('verdict');
+
+if (!S || !S.rows) {
+  bannerEl.innerHTML = '';
+  for (const id of ['picker', 'prediction', 'confidence', 'dist', 'health'])
+    notGenerated(document.getElementById(id), 'scripts/run_phase5_samples.py',
+                 ['results/paper/by_provider/&lt;provider&gt;/phase5_samples.json']);
+} else {
+  /* The reader must never be unsure which stack produced a number. */
+  bannerEl.innerHTML = `<div class="banner">
+    <span>provider <b>${esc(S.provider)}</b></span><span class="sep">|</span>
+    <span>model <b>${esc(S.model)}</b></span><span class="sep">|</span>
+    <span>confidence <b>${esc(S.confidence_method)}</b></span>
+    <span class="sep">|</span>
+    <span>prompt <b>${esc(S.prompt_version)}</b></span><span class="sep">|</span>
+    <span>graph <b>${esc(S.graph_runtime)}</b></span><span class="sep">|</span>
+    <span>seed <b>${esc(S.seed)}</b></span>
+  </div>`;
+
+  if (H) {
+    const ok = H.verdict !== 'no_headroom';
+    verdictEl.innerHTML = `<div class="verdict-card ${ok ? 'ok' : ''}">
+      <strong>Confidence headroom: ${esc(H.verdict)}</strong>
+      <div class="small muted" style="margin-top:6px">${esc(H.verdict_text)}</div>
+    </div>`;
+  }
+
+  const rows = S.rows;
+  document.getElementById('pick-meta').textContent =
+    `${rows.length} windows (${rows.filter((r) => r.condition === 'healthy').length}`
+    + ` healthy, ${rows.filter((r) => r.condition === 'injected').length} injected)`;
+
+  document.getElementById('picker').innerHTML = `<select id="w">${
+    rows.map((r, i) => {
+      const cond = r.condition === 'healthy' ? 'healthy'
+        : `${r.failure_type} sev${r.severity}`;
+      return `<option value="${i}">${esc(cond)} — true ${esc(r.true_label)}`
+           + ` → predicted ${esc(r.predicted_label)}`
+           + ` ${r.correct ? '✓' : '✗'}</option>`;
+    }).join('')}</select>`;
+  const sel = document.getElementById('w');
+
+  function render() {
+    const r = rows[Number(sel.value)];
+    if (!r) return;
+
+    document.getElementById('prediction').innerHTML = `
+      <div class="predrow">
+        <div class="predbox"><div class="k">Condition</div>
+          <div class="v">${r.condition === 'healthy' ? 'healthy'
+            : esc(r.failure_type) + ' sev' + r.severity}</div></div>
+        <div class="predbox"><div class="k">True label</div>
+          <div class="v">${esc(r.true_label)}</div></div>
+        <div class="predbox ${r.correct ? 'hit' : 'miss'}">
+          <div class="k">Predicted</div>
+          <div class="v">${esc(r.predicted_label)}
+            ${r.correct ? '✓' : '✗'}</div></div>
+      </div>`;
+
+    const primary = r.primary_confidence_signal;
+    const cells = [
+      ['max_p', r.max_p, 4,
+       'softmax maximum — saturates first and then hides everything'],
+      ['log_margin', r.log_margin, 3,
+       'top1 − top2 in LOG space — keeps resolution after max_p pins at 1.0'],
+      ['entropy', r.entropy, 4, 'whole-distribution spread'],
+    ];
+    document.getElementById('confidence').innerHTML = `<div class="conf">${
+      cells.map(([k, v, d, why]) => `
+        <div class="c ${k === primary ? 'primary' : ''}">
+          <div class="k">${esc(k)}${k === primary ? ' &middot; primary' : ''}</div>
+          <div class="n">${v === null || v === undefined ? '&ndash;' : fmt(v, d)}</div>
+          <div class="why">${esc(why)}</div>
+        </div>`).join('')}</div>
+      <div class="legend-note">Primary signal for this provider:
+        <strong>${esc(primary)}</strong>${H ? ` &mdash; chosen by the headroom
+        probe (verdict <em>${esc(H.verdict)}</em>).` : '.'}
+        Repeats: ${r.repeats}, max_p spread ${fmt(r.max_p_spread, 6)}
+        ${r.bit_identical_repeats ? '(bit-identical)' : '(varies)'}.</div>`;
+
+    const d = r.distribution || {};
+    const ks = Object.keys(d);
+    const mx = Math.max(...Object.values(d), 1e-9);
+    document.getElementById('dist').innerHTML = `<div class="bars">${
+      ks.map((k) => `
+        <div class="bar-row" title="${esc(k)}: ${fmt(d[k], 6)}">
+          <span class="name">${esc(k)}</span>
+          <div class="bar-track"><div class="bar-fill"
+            style="width:${(d[k] / mx * 100).toFixed(2)}%"></div></div>
+          <span class="val">${fmt(d[k], 4)}</span>
+        </div>`).join('')}</div>`;
+
+    const hs = r.health_states || {};
+    document.getElementById('health').innerHTML = `<table class="h">
+      <thead><tr><th>Node</th><th>State</th><th>Diagnosis</th>
+        <th>Trust weight (unused in S1)</th></tr></thead>
+      <tbody>${Object.keys(hs).map((n) => `<tr>
+        <td>${esc(n)}</td>
+        <td class="st-${esc(hs[n])}">${esc(hs[n])}</td>
+        <td>${esc((r.health_diagnoses || {})[n] || '')}</td>
+        <td>${fmt((r.trust_weights || {})[n], 2)}</td>
+      </tr>`).join('')}</tbody></table>
+      <div class="legend-note">S1 shows the agent these states but does not act
+        on them. <code>trust_weight</code> is carried for Phase 7 and is
+        deliberately unused here.</div>`;
+  }
+
+  sel.addEventListener('change', render);
+  render();
+}
+</script>
+
+</body>
+</html>

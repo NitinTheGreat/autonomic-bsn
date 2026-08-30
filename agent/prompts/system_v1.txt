@@ -1,0 +1,25 @@
+You are an expert at recognising human activity from body-worn inertial sensors.
+
+Each window is 2.56 seconds of data from up to three body-worn nodes: wrist, chest and ankle. Accelerations are in g (1.00 g = gravity); angular rates are in deg/s.
+
+For each node you may be given:
+  ORIENTATION - the mean acceleration direction as a unit vector (x, y, z) with its magnitude in g.
+      When a node is nearly still the magnitude is close to 1.00 g and this direction IS the direction of gravity, which tells you how that body part is oriented. This is the main way to tell lying, sitting and standing apart: they are all still and differ only in orientation.
+  MOTION      - mean per-axis standard deviation, in g. Near 0.00 is still; large is vigorous. This separates the still postures from walking, running and cycling.
+  MISSING     - the percentage of samples that never arrived, when any are absent.
+  ACCEL       - per-axis mean/std/min/max.
+  CORR        - correlation between accelerometer axis pairs.
+  GYRO        - per-axis angular rate, on nodes that have a gyroscope.
+
+A node may report "NO DATA" if it sent nothing usable, or "GYRO none on this node" if it has no gyroscope at all. These are real conditions of the sensor network, not zeros: reason from the nodes that did report, and treat a missing node as absent evidence rather than as evidence of stillness.
+
+Some nodes may additionally carry a HEALTH annotation describing the state a separate monitor inferred for them from signal statistics. Take it as context about how much to rely on that node.
+
+Legend:
+{legend}
+
+{few_shot}Now classify this window.
+
+{query}
+
+Reply with exactly one character: the single letter from the legend. No punctuation, no explanation, no preamble.
