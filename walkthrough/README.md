@@ -13,6 +13,7 @@ verified, what is still open, and how to start the next phase.
 | [`phase2.md`](phase2.md) | Phase 2 — pluggable data layer & dataset explorer |
 | [`phase3.md`](phase3.md) | Phase 3 — failure injection lab |
 | [`phase4.md`](phase4.md) | Phase 4 — health monitor |
+| [`phase5.md`](phase5.md) | Phase 5 — baseline agent (S1) + confidence |
 | … | … |
 
 ## What every phase document must contain
