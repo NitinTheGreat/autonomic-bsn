@@ -8,9 +8,9 @@
 # backend: openai | anthropic | llamacpp | vllm | vertex | gemini | ollama_native | auto
 #   auto -> try each entry of `fallback_order` until one returns real logprobs.
 #
-# The BSN_BACKEND environment variable OVERRIDES this value when set, so you can
-# switch stacks without editing a tracked file:
-#     BSN_BACKEND=anthropic python scripts/check_logprobs.py
+# LLM_PROVIDER or BSN_BACKEND (equivalent) OVERRIDE this value when set, so you
+# can switch stacks without editing a tracked file:
+#     LLM_PROVIDER=cerebras python scripts/check_logprobs.py
 backend: openai
 
 # Only genuine logprob backends belong here. `anthropic` is deliberately
@@ -18,7 +18,7 @@ backend: openai
 # sampling, so silently falling back to it would change what the numbers mean
 # with no visible signal. Select it explicitly if you want it.
 # `vertex`/`gemini` are excluded while paused (see below).
-fallback_order: [openai, llamacpp, vllm]
+fallback_order: [openai, cerebras, llamacpp, vllm]
 
 # Refuse to run any backend whose confidence is not model log-probabilities.
 # Set false only to deliberately accept self-consistency sampling.
@@ -31,12 +31,36 @@ backends:
   # and why the 8-label set (A-H) fits comfortably in one request.
   openai:
     endpoint: "https://api.openai.com/v1/chat/completions"
-    # CONFIRM this against OpenAI's current model list before a real run --
-    # model names change and are deprecated on a rolling basis.
-    model: "gpt-4o-mini"
+    model: "gpt-4o"              # OPENAI_MODEL in .env overrides this
     style: openai
     api_key_env: OPENAI_API_KEY
     auth_style: bearer
+    base_url_env: OPENAI_BASE_URL      # .env may point at a proxy/gateway
+    model_env: OPENAI_MODEL
+    path: "/chat/completions"
+    # VERIFIED LIVE 2026-08-30: gpt-4o returns logprobs.content[0].top_logprobs.
+    notes: "paid -- use for paper results and final experiments"
+
+  # ---------------------------------------------------------------- HOSTED --
+  # Cerebras. OpenAI-compatible, so it reuses the `openai` style unchanged --
+  # same request body, same response shape, only the base URL and key differ.
+  #
+  # VERIFIED LIVE 2026-08-30: gemma-4-31b returns real top_logprobs. Its
+  # distribution is far more peaked than gpt-4o's (top token at logprob -0.0
+  # against gpt-4o's -0.577 on the same probe), which matters for calibration
+  # work -- a near-saturated distribution has little headroom to express
+  # degraded confidence. Use it for development and demos; use OpenAI for the
+  # paper.
+  cerebras:
+    endpoint: "https://api.cerebras.ai/v1/chat/completions"
+    model: "gemma-4-31b"         # CEREBRAS_MODEL in .env overrides this
+    style: openai
+    api_key_env: CEREBRAS_API_KEY
+    auth_style: bearer
+    base_url_env: CEREBRAS_BASE_URL
+    model_env: CEREBRAS_MODEL
+    path: "/chat/completions"
+    notes: "free -- use for development, testing and demos"
 
   # ---------------------------------------------------------------- HOSTED --
   # Anthropic Messages API. NO LOGPROBS -- self-consistency instead.
@@ -154,6 +178,10 @@ backends:
 
 request:
   timeout_s: 120
+  # Free tiers rate-limit well below a 150-window run's call rate. Retries are
+  # bounded and never silent -- exhausting them still raises.
+  max_retries: 6
+  retry_backoff_s: 2.0
   temperature: 0.0
   # Step 1 uses 6 labels (A-F); the spec fixes n_probs at 6 there.
   step1_n_probs: 6

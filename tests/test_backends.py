@@ -84,6 +84,11 @@ def cfg_for(backend: str, path: str, **over) -> dict:
     cfg = C.load_config()
     b = cfg["backends"][backend]
     b["endpoint"] = BASE + path
+    # Belt and braces: strip the env-override hooks so no *_BASE_URL / *_MODEL
+    # in .env can repoint a mocked test at a real, paid endpoint.
+    b.pop("base_url_env", None)
+    b.pop("model_env", None)
+    b["_default_endpoint"] = b["endpoint"]
     b.update(over)
     cfg["require_logprobs"] = False   # individual tests opt back in
     return cfg
@@ -98,12 +103,18 @@ def test_logprob_backends_agree():
     """Every logprob backend must yield the SAME distribution for the same
     fixture -- proving they share one softmax, not parallel implementations."""
     print("\n[1] logprob backends share one softmax path")
-    os.environ["OPENAI_API_KEY"] = "test-key"
+    # Set every key the mocked backends need. Tests must never depend on what
+    # happens to be in .env -- relying on that made this suite pass only on a
+    # machine that already had real credentials.
+    for _k in ("OPENAI_API_KEY", "CEREBRAS_API_KEY", "GEMINI_API_KEY",
+               "ANTHROPIC_API_KEY"):
+        os.environ[_k] = "test-key"
     results = {}
     for backend, mode, path in [
         ("llamacpp", "llamacpp_good", "/completion"),
         ("vllm", "vllm_good", "/v1/completions"),
         ("openai", "openai_good", "/v1/chat/completions"),
+        ("cerebras", "openai_good", "/v1/chat/completions"),
         ("gemini", "gemini_good", "/v1beta/models/{model}:generateContent"),
     ]:
         with Mock(mode):
@@ -121,8 +132,8 @@ def test_logprob_backends_agree():
                    results["llamacpp"]["distribution"][k], 1e-12)
             for k in LETTERS6)
         for b in results)
-    check("all four backends produce identical distributions", same,
-          "shared softmax confirmed")
+    check("all %d backends produce identical distributions" % len(results),
+          same, "shared softmax confirmed -- cerebras reuses the openai style")
 
 
 def test_openai_guards():
@@ -151,8 +162,11 @@ def test_openai_guards():
             check("error lists the tokens actually returned",
                   "Answer" in msg or "The" in msg, "diagnosable prompt format")
 
-    # missing key
-    saved = os.environ.pop("OPENAI_API_KEY", None)
+    # Missing key. Setting it EMPTY rather than popping: load_config() calls
+    # load_dotenv(), which would restore a popped key straight back out of
+    # .env and make this assertion pass only on a machine with no credentials.
+    saved = os.environ.get("OPENAI_API_KEY")
+    os.environ["OPENAI_API_KEY"] = ""
     try:
         C.score_labels(cfg_for("openai", "/v1/chat/completions"),
                        "openai", "p", LETTERS6, 6)
@@ -160,8 +174,7 @@ def test_openai_guards():
     except C.LogprobError as e:
         check("missing OPENAI_API_KEY is actionable",
               "OPENAI_API_KEY" in str(e) and "not set" in str(e))
-    if saved:
-        os.environ["OPENAI_API_KEY"] = saved
+    os.environ["OPENAI_API_KEY"] = saved or "test-key"
 
 
 def test_openai_request_shape():
@@ -268,8 +281,8 @@ def test_backend_selection():
     chain = C.resolve_backends(cfg)
     os.environ.pop("BSN_BACKEND", None)
 
-    check("auto chain is all-logprob", chain == ["openai", "llamacpp", "vllm"],
-          str(chain))
+    check("auto chain is all-logprob",
+          chain == ["openai", "cerebras", "llamacpp", "vllm"], str(chain))
     check("anthropic NOT in fallback chain", "anthropic" not in chain,
           "silent logprob->sampling fallback would corrupt results")
     check("paused vertex NOT in fallback chain", "vertex" not in chain)

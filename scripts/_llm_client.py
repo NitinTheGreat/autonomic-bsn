@@ -26,6 +26,7 @@ import json
 import math
 import os
 import re
+import time
 from typing import Iterable
 
 import requests
@@ -72,7 +73,14 @@ def load_config(path: str | None = None) -> dict:
     load_dotenv()
     path = path or os.path.join(REPO_ROOT, "configs", "models.yaml")
     with open(path, "r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        cfg = yaml.safe_load(fh)
+    # Remember each backend's shipped endpoint so call_backend can tell an
+    # untouched default (which a *_BASE_URL env var may override) from one a
+    # caller has deliberately repointed (which must win).
+    for b in (cfg.get("backends") or {}).values():
+        if isinstance(b, dict) and "endpoint" in b:
+            b["_default_endpoint"] = b["endpoint"]
+    return cfg
 
 
 def require_api_key(backend: str, key_env: str) -> str:
@@ -460,6 +468,24 @@ def call_backend(cfg: dict, backend: str, prompt: str, n_probs: int) -> dict:
     cfg_b = cfg["backends"][backend]
     style = cfg_b.get("style", backend)
 
+    # Env overrides for hosted providers, so a base URL or model can be
+    # switched in .env without editing a tracked file.
+    if cfg_b.get("model_env"):
+        env_model = os.environ.get(cfg_b["model_env"], "").strip()
+        if env_model:
+            cfg_b = {**cfg_b, "model": env_model}
+    if cfg_b.get("base_url_env"):
+        env_base = os.environ.get(cfg_b["base_url_env"], "").strip()
+        # Only override the endpoint the YAML shipped with. A caller that has
+        # explicitly repointed `endpoint` at runtime -- a test mock, a local
+        # proxy -- must win, or the env var silently drags requests back to the
+        # real (paid) API behind their back.
+        pinned = cfg_b.get("endpoint") != cfg_b.get("_default_endpoint",
+                                                    cfg_b.get("endpoint"))
+        if env_base and not pinned:
+            cfg_b = {**cfg_b,
+                     "endpoint": env_base.rstrip("/") + cfg_b.get("path", "")}
+
     # Hosted endpoints carry the model (and for Vertex, the project/location)
     # in their path. Values may come from config or the environment.
     project = (cfg_b.get("project")
@@ -499,12 +525,37 @@ def call_backend(cfg: dict, backend: str, prompt: str, n_probs: int) -> dict:
 
     payload = _build_payload(style, cfg_b, prompt, n_probs,
                              float(cfg["request"]["temperature"]))
-    try:
-        r = requests.post(endpoint, json=payload, headers=headers,
-                          timeout=float(cfg["request"]["timeout_s"]))
-    except requests.RequestException as exc:
-        raise LogprobError(
-            backend + ": cannot reach " + endpoint + " -- " + str(exc)) from exc
+    # Bounded retry on rate limits and transient server errors. A baseline run
+    # makes ~150 sequential calls, and free tiers rate-limit well below that --
+    # without this, a single 429 aborts the whole gate. Retries are capped and
+    # never silent: exhausting them still raises.
+    rq = cfg.get("request", {})
+    max_retries = int(rq.get("max_retries", 5))
+    backoff = float(rq.get("retry_backoff_s", 2.0))
+    r = None
+    for attempt in range(max_retries + 1):
+        try:
+            r = requests.post(endpoint, json=payload, headers=headers,
+                              timeout=float(rq["timeout_s"]))
+        except requests.RequestException as exc:
+            if attempt >= max_retries:
+                raise LogprobError(backend + ": cannot reach " + endpoint +
+                                   " -- " + str(exc)) from exc
+            time.sleep(backoff * (2 ** attempt))
+            continue
+        if r.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
+            # Honour Retry-After when the server sends one.
+            wait = backoff * (2 ** attempt)
+            hdr = r.headers.get("retry-after")
+            if hdr:
+                try:
+                    wait = max(wait, float(hdr))
+                except ValueError:
+                    pass
+            time.sleep(wait)
+            continue
+        break
+
     if r.status_code != 200:
         # Surface the API's own message: it names the real cause (bad key,
         # quota, or "Logprobs is not supported for this model").
@@ -694,8 +745,11 @@ def resolve_backends(cfg: dict, override: str | None = None) -> list[str]:
     from a logprob method to a sampling method would change what the numbers
     mean with no visible signal. It must be selected explicitly.
     """
-    chosen = override or os.environ.get("BSN_BACKEND", "").strip() \
-        or cfg.get("backend", "llamacpp")
+    # LLM_PROVIDER and BSN_BACKEND are equivalent; either selects the backend.
+    chosen = (override
+              or os.environ.get("BSN_BACKEND", "").strip()
+              or os.environ.get("LLM_PROVIDER", "").strip()
+              or cfg.get("backend", "llamacpp"))
 
     if cfg.get("require_logprobs") and chosen != "auto":
         if confidence_method_for(cfg, chosen) != "logprob":

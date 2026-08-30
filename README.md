@@ -181,6 +181,30 @@ log-probability distribution**. Several popular endpoints return `200 OK` with
 no usable confidence data, which fails *invisibly*. Two such traps are guarded
 in code:
 
+### Gate status (live, 2026-08-30)
+
+| Gate | Result |
+|---|---|
+| 1 — logprob extraction | **PASS** on `gpt-4o` and `gemma-4-31b` |
+| 2 — baseline accuracy | **FAIL** — 0.4722, threshold 0.65 |
+
+Select with `LLM_PROVIDER=openai` (paid, paper results) or `cerebras` (free,
+dev/demos). `BSN_BACKEND` is an equivalent alias and wins if both are set.
+Both providers were verified to return real logprobs before use.
+
+> **Cerebras' distribution is near-saturated** — max_prob 0.99999 against
+> gpt-4o's 0.9019 on the same probe. A model with no headroom below 1.0 cannot
+> express degraded confidence, which is the quantity this project measures.
+> Develop on Cerebras; measure on OpenAI.
+
+**Gate 2 failing puts the Phase 1 STOP condition in force** — Phase 5 stays
+blocked. Walking scored 0.000 (every window absorbed into a stair class) and
+100 % of top confusions involve stairs. A measured probe of the top-ranked fix
+(drop to the 6-class set) reached 0.5833 — better, still failing, and it
+relocates the error onto the static postures, making the residual gap a
+feature/presentation problem rather than a class-count one. Detail and ranked
+next steps: [`walkthrough/phase1.md`](walkthrough/phase1.md) §6a.
+
 ### ⚠️ The Gemini Developer API does not expose logprobs
 
 **Verified against the live API, not just the docs.** All 12 probed models --

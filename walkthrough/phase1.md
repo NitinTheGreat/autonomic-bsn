@@ -1,8 +1,8 @@
 # Phase 1 — Foundational de-risking
 
-**Status:** infrastructure complete and verified; **the two headline checks are
-not yet answered** because they need a live model. Read "Current blockers"
-before assuming anything passed.
+**Status:** BOTH GATES NOW RUN AGAINST LIVE MODELS (2026-08-30).
+**Gate 1 PASSES. Gate 2 FAILS at 0.4722 against a 0.65 threshold.**
+The STOP condition is in force — see §6a.
 
 **Date:** 2026-08-29
 
@@ -232,11 +232,99 @@ at runtime — the script aborts if they overlap).
 
 ---
 
+## 6a. GATE RESULTS — run live 2026-08-30
+
+Two logprob providers were credentialed. Both were **verified empirically
+before use**, not trusted — the same check that previously caught Ollama and
+the Gemini Developer API silently lacking logprobs.
+
+| Provider | Model | Logprobs | Role |
+|---|---|---|---|
+| OpenAI | `gpt-4o` | **verified live** | paid — paper results |
+| Cerebras | `gemma-4-31b` | **verified live** | free — development, demos |
+
+### Gate 1 — logprob extraction: **PASS**
+
+Both return a real, non-uniform distribution summing to 1.0.
+
+| Provider | max_prob | 2nd | Shape |
+|---|---|---|---|
+| gpt-4o | 0.9019 | 0.0981 | informative spread |
+| gemma-4-31b | 0.99999 | 0.00001 | **near-saturated** |
+
+**Cerebras' saturation is a finding, not a detail.** This project measures
+whether a model becomes *confidently wrong*. A model pinned at p = 0.99999 has
+almost no headroom to express degraded confidence, so calibration work on it
+would compress into the top bin. Develop on Cerebras; measure on OpenAI.
+
+### Gate 2 — baseline accuracy: **FAIL (0.4722 < 0.65)**
+
+144 windows, subjects 101/105/106, gpt-4o, 8 classes (chance 0.125).
+
+| Class | Accuracy | | Class | Accuracy |
+|---|---|---|---|---|
+| cycling | **1.000** | | lying | 0.278 |
+| running | 0.889 | | sitting | 0.278 |
+| descending_stairs | 0.778 | | standing | 0.056 |
+| ascending_stairs | 0.500 | | **walking** | **0.000** |
+
+Three most-confused pairs — **100 % involve stairs**:
+
+- `standing → ascending_stairs` — 14 windows (77.8 % of the class)
+- `walking → ascending_stairs` — 13 windows (72.2 %)
+- `ascending_stairs → descending_stairs` — 9 windows (50.0 %)
+
+Walking scoring **0.000** is the striking result: every walking window was
+absorbed into a stair class.
+
+### Probe: does dropping stairs fix it? Partly — and it relocates the problem
+
+The script's own ranked diagnosis put "(c) drop the two stair classes" first,
+so that was **measured rather than assumed**
+(`scripts/probe_label_set.py` → `results/phase1/label_set_probe.json`).
+
+| Label set | Chance | Accuracy | Verdict |
+|---|---|---|---|
+| 8-class | 0.125 | 0.4722 | FAIL |
+| **6-class** | 0.167 | **0.5833** | **still FAIL** (+0.111) |
+
+Dropping stairs fixes the *dynamic* classes outright — walking 0.000 → 0.750,
+running 1.000, cycling 0.938 — but the failure moves to the **static
+postures**: sitting 0.062, lying 0.375, standing 0.375, now confusing
+`sitting → standing` (62.5 %) and `standing → cycling` (43.8 %).
+
+Static postures differ almost entirely by **gravity orientation**, which the
+45-number feature summary does contain (per-axis mean) but does not
+foreground. The remaining gap is therefore a **feature/presentation problem,
+not a class-count problem** — and the re-run diagnosis says exactly that.
+
+### What this means
+
+**The STOP condition from the Phase 1 brief is in force.** Phase 5 stays
+blocked — now for a substantive reason rather than a credentials one.
+
+Ranked by what the data actually shows:
+
+1. **(b) Foreground orientation.** Add explicit tilt / mean-gravity-direction
+   features, or restate the per-axis means as an orientation summary. This is
+   where both runs' residual error now lives.
+2. **(a) Few-shot examples emphasising orientation**, for the three static
+   postures specifically.
+3. **(c) The 6-class set** helps (+0.111) and is already measured — but it
+   costs the two hardest classes, which are the most informative about
+   degradation-induced confusion. A real trade, not a free win.
+4. **(d) A larger model** is last: gpt-4o already scores 1.000 on cycling and
+   0.889 on running, so the ceiling is not obviously model capacity.
+
+---
+
 ## 7. Current blockers
 
-1. **An API key for a logprob backend.** The default is now `openai`, which has
-   true logprobs. Set `OPENAI_API_KEY` in `.env`. Alternatives that need no
-   key: run `llama-server` locally and set `BSN_BACKEND=llamacpp`.
+1. ~~An API key for a logprob backend.~~ **RESOLVED 2026-08-30** — OpenAI and
+   Cerebras are both credentialed and verified. Gate 1 passes.
+
+1b. **Gate 2 accuracy: 0.4722, needs 0.65.** This is now the blocker. See §6a
+   for the measured, ranked diagnosis.
 
    **Vertex is PARKED, not abandoned.** The `vertex` and `gemini` backends are
    left in place, unchanged and correct; they are simply removed from
